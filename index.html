@@ -605,6 +605,8 @@ function genStrip(k) {
   // 横線路（環状線）と縦線路（陸地中央の高架線）の交差点＝ターミナル駅。性格はランダム:
   // 4割 オフィス街 / 2割5分 歓楽街 / 残りは発展していない（まわりは元の住宅地や公園のまま）
   const terms = BRIDGE_Z.map(zb => { const r = rand(); return { z: zb, kind: r < 0.4 ? 'office' : r < 0.65 ? 'neon' : 'plain', r: rr(260, 420) }; });
+  const ELEV_ZS = [NEW_YARD_Z, HUB_Z, ZG_Z];
+  for (const t of terms) if (ELEV_ZS.includes(t.z)) { t.kind = 'office'; t.r = 480; t.elev = true; }   // エレベーターの真下のターミナルは大きく発展
   (landmarks.terminals ??= [])[k] = terms;
   const nearPlainTerm = (s, z) => terms.some(t => t.kind === 'plain' && Math.hypot(s, z - t.z) < 260);
   landmarks.samples ??= {};
@@ -649,6 +651,7 @@ function genStrip(k) {
     let type;
     if (Math.abs(s) < P && terms.some(t => Math.abs(z - t.z) < P)) type = 'plaza';     // ターミナルの4隅は駅ビル
     else if (RESORT.k === k && i >= RESORT.i0 && j >= RESORT.j0 && j <= RESORT.j1) type = 'resort';
+    else if (Math.abs(s) < 360 && ELEV_ZS.some(Z => Math.abs(z - Z) < 360) && rand() < 0.92) type = 'down';   // エレベーター駅のまわりは街区の種類に関係なくビルを密集
     else if (i === river) type = 'river';
     else if (i === 0 || i === NS - 1) type = 'park';
     else if (bigParks.some(p => i >= p.i0 && i <= p.i1 && j >= p.j0 && j <= p.j1)) type = 'park';
@@ -1406,9 +1409,9 @@ function updateElevators(t) {
 const OMEGA = Math.sqrt(9.8 / R);                    // 約0.057 rad/s（約110秒で1回転）
 
 // ===== 観光名所: 無重力パーク・逆さ滝・リング大観覧車 =====
-const ZG_Z = 2500;                                    // 無重力パークの軸方向の位置
+const ZG_Z = BRIDGE_Z[9];                             // 無重力パーク（環状線の z に合わせ、真下がターミナル駅になる）
 // 軸ぞいの並び: 宇宙港（-z 端）→ 新造船所（NEW_YARD_Z）→ 旧造船所＝今の中央駅（HUB_Z）→ 無重力パーク（ZG_Z）
-const NEW_YARD_Z = -4300;
+const NEW_YARD_Z = BRIDGE_Z[3];                       // 新造船所（同上）
 const HUB_CRANES = [[0.9, -170], [0.9 + Math.PI, 160], [2.5, -60], [4.2, 90], [5.6, -230], [1.7, 220]];   // 旧造船所のクレーン（角度, HUB_Z からのずれ）
 const HUB_RINGS = [-330, 330], HUB_RING_R = 250;   // 古い船台のオレンジの輪
 const hubSurfR = dz => 90 + 150 * Math.max(0, 1 - (dz / 280) ** 2) * 0.6;   // 中央駅の巣の表面のおおよその半径（クレーンやスポークを刺す位置）
@@ -1552,9 +1555,9 @@ function updateShipyards(t) {
 }
 
 // ===== 中心軸の駅: 軸を包む構造物の塊（スズメバチの巣のよう）＋地面へ伸びるスポーク状のエレベーター＋ネオン看板 =====
-const HUB_Z = -500;
+const HUB_Z = BRIDGE_Z[6];                            // 中央駅（同上）
 const HUB_SPOKES = [];
-for (let k = 0; k < 3; k++) for (const d of [-0.25, 0.25]) HUB_SPOKES.push(STRIP_PHI[k] + d);   // 陸地ごとに2本、計6本
+for (let k = 0; k < 3; k++) HUB_SPOKES.push(STRIP_PHI[k], WIN_PHI[k]);   // 60°おきの6本: 陸地の中央（ターミナル駅の真上）と窓の中央（橋の上）
 // スポーク状のエレベーターがある場所（軸ぞいの3か所）: 軸方向の位置と、上端（軸からの半径）
 const SPOKE_SITES = [{ z: () => HUB_Z, r: 230 }, { z: () => NEW_YARD_Z, r: 232 }, { z: () => ZG_Z, r: 252 }];
 let hubCabMesh, hubNeonMat, hubWarn, hubWarnMat;
@@ -1581,10 +1584,12 @@ function buildHubStation() {
   const posts = [], braces = [], bases = [];
   for (const site of SPOKE_SITES) for (const th of HUB_SPOKES) {
     const Z = site.z(), top = R - site.r;
-    for (const [ds, dz] of [[-9, -9], [9, -9], [-9, 9], [9, 9]]) posts.push(th + ds / R, Z + dz, 0, 2.2, top, 2.2);
-    for (let h = 60; h < top; h += 60) { braces.push(th, Z - 9, h, 20, 1.2, 1.2); braces.push(th, Z + 9, h, 20, 1.2, 1.2); braces.push(th - 9 / R, Z, h + 30, 1.2, 1.2, 20); braces.push(th + 9 / R, Z, h + 30, 1.2, 1.2, 20); }
-    bases.push(th, Z, 0, 60, 26, 60, 0xb8bec6);                                               // 地上駅
-    bases.push(th, Z, 26, 40, 8, 40, 0x8a9099);
+    const DECK = 22;                                                   // 環状線の高架（〜20m）の上に載る駅のデッキ
+    for (const [ds, dz] of [[-9, -9], [9, -9], [-9, 9], [9, 9]]) posts.push(th + ds / R, Z + dz, DECK + 10, 2.2, top - DECK - 10, 2.2);
+    for (const [ds, dz] of [[-33, -33], [33, -33], [-33, 33], [33, 33]]) posts.push(th + ds / R, Z + dz, 0, 3, DECK, 3);   // デッキの脚
+    for (let h = DECK + 60; h < top; h += 60) { braces.push(th, Z - 9, h, 20, 1.2, 1.2); braces.push(th, Z + 9, h, 20, 1.2, 1.2); braces.push(th - 9 / R, Z, h + 30, 1.2, 1.2, 20); braces.push(th + 9 / R, Z, h + 30, 1.2, 1.2, 20); }
+    bases.push(th, Z, DECK, 74, 6, 74, 0xb8bec6);                                             // 駅のデッキ（線路をまたぐ）
+    bases.push(th, Z, DECK + 6, 44, 10, 44, 0xdfe5ea);                                        // エレベーターの乗り場
   }
   const trussM = patch(new THREE.MeshStandardMaterial({ color: 0xc8ccd2, roughness: 0.45, metalness: 0.5 }));
   scene.add(instanced(GEO.box, trussM, posts, 6, { color: false, cast: false }));
@@ -1592,7 +1597,7 @@ function buildHubStation() {
   scene.add(instanced(GEO.box, M.bld, bases, 7, { cast: false }));
   // 赤い警告灯（スポークの4隅の柱に150mおき。昼夜とわず点滅）
   const warn = [];
-  for (const site of SPOKE_SITES) for (const th of HUB_SPOKES) for (let h = 40; h < R - site.r - 10; h += 150) for (const [ds, dz] of [[-10, -10], [10, 10]]) warn.push(th + ds / R, site.z() + dz, h, 6, 6, 6);
+  for (const site of SPOKE_SITES) for (const th of HUB_SPOKES) for (let h = 60; h < R - site.r - 10; h += 150) for (const [ds, dz] of [[-10, -10], [10, 10]]) warn.push(th + ds / R, site.z() + dz, h, 6, 6, 6);
   for (const dz of HUB_RINGS) {                                        // オレンジの輪とスポークの先
     for (let n = 0; n < 24; n++) warn.push(n / 24 * TAU, HUB_Z + dz, R - HUB_RING_R - 10, 9, 9, 9);
     for (let i = 0; i < 8; i++) { const zIn = Math.sign(dz) * 235, rIn = hubSurfR(zIn); warn.push((i + 0.5) / 8 * TAU, HUB_Z + (dz + zIn) / 2, R - (HUB_RING_R + rIn) / 2 - 7, 7, 7, 7); }
@@ -1650,7 +1655,7 @@ function updateHubStation(t) {
       for (let c = 0; c < 2; c++) {
         const u = (t / 90 + i * 0.37 + si * 0.23 + c * 0.5) % 1;
         const q = u < 0.45 ? u / 0.45 : u < 0.5 ? 1 : u < 0.95 ? 1 - (u - 0.5) / 0.45 : 0;
-        writeBox(a, ((si * HUB_SPOKES.length + i) * 2 + c) * 16, th + (c ? 4.5 : -4.5) / R, Z, 30 + (top - 30) * q * q * (3 - 2 * q), 8, 12, 14);
+        writeBox(a, ((si * HUB_SPOKES.length + i) * 2 + c) * 16, th + (c ? 4.5 : -4.5) / R, Z, 40 + (top - 40) * q * q * (3 - 2 * q), 8, 12, 14);
       }
     });
   });
@@ -3138,6 +3143,7 @@ function buildRailStations() {
   const conc = [];
   for (let k = 0; k < 3; k++) for (const t of landmarks.terminals[k]) {
     const big = t.kind !== 'plain', w = big ? 70 : 34, h = big ? 18 : 9;
+    if (t.elev) for (const ss of [-1, 1]) for (const sz of [-1, 1]) conc.push(STRIP_PHI[k] + ss * (10 + w / 2) / R, t.z + sz * (10 + w / 2), h, 44, rr(110, 210), 44, pick([0x9fb4c8, 0xc8d4de, 0x6c8298, 0xdfe5ea]));   // 駅ビルの上に建つ高層ビル
     for (const ss of [-1, 1]) for (const sz of [-1, 1]) conc.push(STRIP_PHI[k] + ss * (8 + 2 + w / 2) / R, t.z + sz * (8 + 2 + w / 2), 0, w, h, w, big ? 0xdfe3e8 : 0xe8e2d4);
   }
   const m = patch(new THREE.MeshStandardMaterial({ roughness: 0.6 }));
@@ -3395,7 +3401,7 @@ const PRESETS = [
   ['都心の大通り', () => { const c = landmarks.cbd[0][1]; go(STRIP_PHI[0] + roadS(c.s) / R, c.z, EYE, 0, 0.3); }],
   ['大きな公園', () => { const p = landmarks.parks[1][0]; go(STRIP_PHI[1] + p.s / R, p.z, EYE, 0, 0.35); }],
   ['川沿い', () => go(STRIP_PHI[2] + (sCenter(RIVER_I[2]) + P / 2 - 4) / R, 600, EYE, 0, 0.22)],
-  ['橋の上（窓の真上）', () => go(WIN_PHI[0], BRIDGE_Z[6] + 8, EYE, Math.PI / 2 + 0.25, 0.05)],
+  ['橋の上（窓の真上）', () => go(WIN_PHI[0], BRIDGE_Z[5] + 8, EYE, Math.PI / 2 + 0.25, 0.05)],
   ['超高層ビルの屋上', () => { const t = landmarks.tallest[0]; go(STRIP_PHI[0] + t.s / R, t.z + t.d / 2 - 1, t.h + 3, 0, -0.3); }],
   ['上空 1500m', () => go(STRIP_PHI[0], -2000, 1500, 0, -0.05)],
   ['中心軸のそば（無重力帯）', () => go(STRIP_PHI[0], -HL + 1200, R - 80, 0, 0)],
