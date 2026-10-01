@@ -370,13 +370,13 @@ function patch(mat, opts = {}) {
             vec3 farRoom = vec3(0.75, 0.6, 0.42) * (0.5 + 0.6 * bHash(vec3(cid + 7.0, vBId * 13.0))) * mix(0.6, onF * 1.5, uNight);
             winRoom = mix(winRoom, farRoom, lod); }
           float rnd = bHash(vec3(floor(g), vBId * 57.0));
-          diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.16, 0.19, 0.24), vec3(0.42, 0.47, 0.54), rnd * rnd) * mix(1.0, 0.45, oldT), winMask);
+          diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.16, 0.19, 0.24), vec3(0.42, 0.47, 0.54), rnd * rnd) * mix(1.0, 0.72, oldT), winMask);
           if (oldT > 0.5) {
             // 鉄格子（窓の中の縦の棒）と、上から垂れた汚れの筋
             float bar = 1.0 - smoothstep(0.0, max(fw.x * 1.5, 0.02), abs(fract(f.x * 3.0) - 0.5) - 0.42);
             winMask *= 1.0 - 0.8 * bar * (1.0 - lod); winRoom *= 1.0 - 0.8 * bar;
             float streak = bNoise(vec2(hc * 0.9 + vBId * 31.0, vBL.y * 0.04)) * bNoise(vec2(hc * 0.23, vBL.y * 0.15 + vBId * 7.0));
-            diffuseColor.rgb *= 1.0 - 0.45 * smoothstep(0.15, 0.55, streak) * (1.0 - winMask);
+            diffuseColor.rgb *= 1.0 - 0.22 * smoothstep(0.15, 0.55, streak) * (1.0 - winMask);   // 汚れの筋（控えめ）
           }
           // 角・屋上の縁を明るく（面取りの代わり）
           float eDist = min(halfW - abs(hc), vBS.y - vBL.y);
@@ -1406,6 +1406,8 @@ const OMEGA = Math.sqrt(9.8 / R);                    // 約0.057 rad/s（約110�
 const ZG_Z = 2500;                                    // 無重力パークの軸方向の位置
 // 軸ぞいの並び: 宇宙港（-z 端）→ 新造船所（NEW_YARD_Z）→ 旧造船所＝今の中央駅（HUB_Z）→ 無重力パーク（ZG_Z）
 const NEW_YARD_Z = -4300;
+const HUB_CRANES = [[0.9, -170], [0.9 + Math.PI, 160], [2.5, -60], [4.2, 90], [5.6, -230], [1.7, 220]];   // 旧造船所のクレーン（角度, HUB_Z からのずれ）
+const HUB_RINGS = [-330, 330], HUB_RING_R = 250;                                                                // 古い船台のオレンジの輪
 const yard = { sparks: [], ship: null };
 // 造りかけの船体: 竜骨・肋骨（四角い枠）・前から一部だけ張った外板。長さ len、軸は +z
 function hullSkeleton(len, wid, ribCol, plateCol, plated) {
@@ -1439,6 +1441,29 @@ function buildShipyards() {
     for (const dz of [-60, 0, 60]) { const arm = new THREE.Mesh(new THREE.BoxGeometry(230 - r, 2.2, 2.2).translate((230 - r) / 2, 0, 0), new THREE.MeshStandardMaterial({ color: 0xf2c230 })); arm.position.set(Math.cos(a) * r, Math.sin(a) * r, dz); arm.rotation.z = a; g.add(arm); } // 船を支えるアーム
     for (let k = 0; k < 14; k++) yard.sparks.push({ p: new THREE.Vector3(Math.cos(a) * r + rr(-14, 14), Math.sin(a) * r + rr(-14, 14), NEW_YARD_Z + rr(-90, 90)), ph: rand() * 10 });
   }
+  // 造船所の街: 駅・白い建物・物資の山・タンク。組み立て中の船（0.75 / 0.75+π）と進水待ちの船（0.75+π/2）のまわりは空ける
+  const free = a => [0.75, 0.75 + Math.PI, 0.75 + Math.PI / 2].every(b => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b))) > 0.42);
+  const mods = [], crates = [], tanks = [], spheres = [];
+  for (let n = 0; n < 160; n++) {                                     // 軸に張り付いた白い建物（内側 62m〜外へ）
+    const a = rand() * TAU; if (!free(a)) continue;
+    const rIn = rr(62, 80), rOut = rIn + rr(20, 70);
+    mods.push(a, NEW_YARD_Z + rr(-240, 240), R - rOut, rr(14, 40), rOut - rIn, rr(14, 50), pick([0xf2f4f6, 0xe8ecf0, 0xdfe5ea, 0xf4f1ea, 0xc8d4de]));
+  }
+  for (let n = 0; n < 50; n++) {                                     // 物資のコンテナの山（かごの内側の梁に寄せて）
+    const a = rand() * TAU; if (!free(a)) continue;
+    const z = NEW_YARD_Z + rr(-230, 230), w = rr(10, 22), d = rr(16, 40);
+    for (let k = 0, h = 0; k < 2 + Math.floor(rand() * 4); k++) { const hh = rr(3, 4.5); crates.push(a, z, R - 226 + h, w, hh, d, pick([0xb8452f, 0x2f6fa8, 0xd8a531, 0x3d8a52, 0x8a8f96, 0xe2e2dc, 0x7a3f74, 0xf08a24])); h += hh; }
+  }
+  for (let n = 0; n < 26; n++) {                                     // 何かわからないタンク（筒と球）
+    const a = rand() * TAU; if (!free(a)) continue;
+    const z = NEW_YARD_Z + rr(-230, 230), r0 = rr(85, 200), dd = rr(10, 24);
+    if (rand() < 0.5) tanks.push(a, z, R - r0 - dd * 1.6, dd, dd * 1.6, dd, pick([0xe8e8e2, 0xd8d8d0, 0xc8ccd0, 0xd8a531]));
+    else spheres.push(a, z, R - r0 - dd, dd, dd, dd, pick([0xe8e8e2, 0xd8dce0, 0xe8e0c8]));
+  }
+  const crateMat = patch(new THREE.MeshStandardMaterial({ roughness: 0.7, metalness: 0.2 }));
+  scene.add(instanced(GEO.box, M.bld, mods, 7, { cast: false }), instanced(GEO.box, crateMat, crates, 7, { cast: false }),
+    instanced(GEO.cyl, M.tank, tanks, 7, { cast: false }), instanced(GEO.sph, M.tank, spheres, 7, { cast: false }));
+  addAxisPlatforms(NEW_YARD_Z, 0xd8dce0);                              // 軸の電車の駅（造船所前）
   // 投光器の光の点（かごの輪に沿って）
   const lp = []; for (let z = -260; z <= 260; z += 104) for (let i = 0; i < 32; i++) { const a = i / 32 * TAU; lp.push(Math.cos(a) * 226, Math.sin(a) * 226, z); }
   const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute(lp, 3));
@@ -1457,14 +1482,20 @@ function buildShipyards() {
 
   // --- 旧造船所の名残（今の中央駅）: 錆びた巨大クレーン2基、古い船台のリング、保存された造りかけの船体
   const rust = patch(new THREE.MeshStandardMaterial({ color: 0x9a5a36, roughness: 0.9, metalness: 0.2 }));
-  for (const [a, dz] of [[0.9, -170], [0.9 + Math.PI, 160]]) {
+  for (const [a, dz] of HUB_CRANES) {
     const c = new THREE.Group(); c.position.z = HUB_Z + dz; c.rotation.z = a;
     c.add(new THREE.Mesh(new THREE.BoxGeometry(180, 9, 9).translate(240 + 90, 0, 0), rust));        // 外へ張り出した腕
     c.add(new THREE.Mesh(new THREE.BoxGeometry(9, 9, 120).translate(410, 0, -50), rust));            // 腕の先の吊り桁
     c.add(new THREE.Mesh(new THREE.BoxGeometry(3, 3, 70).translate(410, 0, -140), new THREE.MeshStandardMaterial({ color: 0x3a3a3a })));
     scene.add(c);
   }
-  for (const dz of [-330, 330]) scene.add(new THREE.Mesh(new THREE.TorusGeometry(250, 6, 6, 96).translate(0, 0, HUB_Z + dz), rust));   // 古い船台のリング
+  for (const dz of HUB_RINGS) {
+    scene.add(new THREE.Mesh(new THREE.TorusGeometry(HUB_RING_R, 6, 6, 96).translate(0, 0, HUB_Z + dz), rust));   // 古い船台のリング
+    for (let i = 0; i < 8; i++) {                                     // 輪と駅をつなぐスポーク
+      const sp = new THREE.Mesh(new THREE.BoxGeometry(HUB_RING_R - 80, 5, 5).translate(80 + (HUB_RING_R - 80) / 2, 0, HUB_Z + dz), rust);
+      sp.rotation.z = (i + 0.5) / 8 * TAU; scene.add(sp);
+    }
+  }
   const relic = new THREE.Mesh(hullSkeleton(120, 26, 0x8a5a3a, 0x6a4a3a, 0.15), patch(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 })));
   relic.position.set(Math.cos(2.3) * 150, Math.sin(2.3) * 150, HUB_Z + 380); scene.add(relic);   // 最初に造られた船の骨組み（記念に保存）
 }
@@ -1523,11 +1554,11 @@ function buildHubStation() {
   // 赤い警告灯（スポークの4隅の柱に150mおき。昼夜とわず点滅）
   const warn = [];
   for (const th of HUB_SPOKES) for (let h = 40; h < R - 240; h += 150) for (const [ds, dz] of [[-10, -10], [10, 10]]) warn.push(th + ds / R, HUB_Z + dz, h, 6, 6, 6);
-  for (let n = 0; n < 48; n++) {                       // 駅本体（巣）の表面にも点々と
-    const zz = rr(-1, 1), r = 92 + 150 * (1 - zz * zz) * rr(0.85, 1.05);
-    warn.push(rand() * TAU, HUB_Z + zz * 255, R - r - 3, 5, 5, 5);
+  for (const dz of HUB_RINGS) {                                        // オレンジの輪とスポークの先
+    for (let n = 0; n < 24; n++) warn.push(n / 24 * TAU, HUB_Z + dz, R - HUB_RING_R - 10, 9, 9, 9);
+    for (let i = 0; i < 8; i++) warn.push((i + 0.5) / 8 * TAU, HUB_Z + dz, R - (80 + HUB_RING_R) / 2 - 7, 7, 7, 7);
   }
-  for (const dz of [-280, 280]) for (let n = 0; n < 12; n++) warn.push(n / 12 * TAU, HUB_Z + dz, R - 222, 5, 5, 5); // 両端のプラットフォームの縁
+  for (const [a, dz] of HUB_CRANES) for (const r of [330, 425]) warn.push(a, HUB_Z + dz, R - r - 9, 9, 9, 9);   // クレーンの腕の中ほどと先
   hubWarnMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(9, 0.25, 0.15), fog: false }); // 霞に負けず昼も見える
   hubWarn = instanced(new THREE.SphereGeometry(0.5, 8, 6), hubWarnMat, warn, 6, { color: false, cast: false });
   scene.add(hubWarn);
@@ -2412,7 +2443,7 @@ function axisLapPos(tau, stops, span, v) {
 function updateAxisTrains(t) {
   const a = axisCarMesh.instanceMatrix.array, span = 2 * (HL - 150), z0 = -(HL - 150);
   axisTrains.forEach((tr, i) => {
-    const stops = [HUB_Z, ZG_Z].map(Z => tr.dir > 0 ? Z - z0 + 168 : -Z - z0 + 168).sort((p, q) => p - q); // 停車位置（編成の中央がホームに来るよう先頭をずらす）
+    const stops = [NEW_YARD_Z, HUB_Z, ZG_Z].map(Z => tr.dir > 0 ? Z - z0 + 168 : -Z - z0 + 168).sort((p, q) => p - q); // 停車位置（編成の中央がホームに来るよう先頭をずらす）
     const lapT = axisLapTime(span, tr.v, stops.length);
     const x = axisLapPos(((tr.ph * lapT + t) % lapT + lapT) % lapT, stops, span, tr.v);
     for (let c = 0; c < 8; c++) {
@@ -3451,7 +3482,7 @@ const SHOTS = [
     from: preset('宇宙港の出口'), d: { z: 1600, yaw: -0.1, pitch: -0.05 } },
   { ch: '円筒の内側', t: '頭上にも街がある世界', x: '見上げると、反対側の陸地が空のかわりに広がっているのだ。遠くの街ほど空気に霞んで、地面が両側からせり上がっていく――ここが円筒の中だと実感できる眺めなのだ。', dur: 16,
     from: () => go(STRIP_PHI[0], -HL + 1800, R - 700, 0, -0.25), d: { z: 1200, pitch: 0.15 } },
-  { ch: '観光地', t: '新造船所', x: 'このコロニーは、もともと無重力の工場として始まったのだ。今も軸のそばの新造船所では、重さのない空間で大きな船を効率よく組み立てているのだ。できあがった船は、軸ぞいを通って宇宙港から宇宙へ出ていくのだ。', dur: 15,
+  { ch: '観光地', t: '新造船所', x: 'このコロニーは、もともと無重力の工場として始まったのだ。今も軸のそばの新造船所では、重さのない空間で大きな船を効率よく組み立てているのだ。まわりには駅や事務所、積み上がった資材やタンクがひしめき、できあがった船は軸ぞいを通って宇宙港から宇宙へ出ていくのだ。', dur: 15,
     from: () => aimCam(0.75 + 0.35, NEW_YARD_Z - 230, R - 330, new THREE.Vector3(Math.cos(0.75) * 140, Math.sin(0.75) * 140, NEW_YARD_Z)), d: { z: 120 } },  // かごの外から組み立て中の船をねらう
   { ch: '観光地', t: 'コロニー中央駅（旧造船所）', x: '中央駅は、昔は最初の造船所だったのだ。錆びた巨大クレーンや船台のリング、最初に造られた船の骨組みが今も残っているのだ。そのまわりに駅と店が増築を重ねて、蜂の巣のような姿になったのだ。', dur: 16,
     from: () => go(STRIP_PHI[0] + 0.62, HUB_Z - 750, R - 520, 0.35, 0.42), d: { yaw: 0.25, z: 120 } },
@@ -3695,6 +3726,7 @@ addEventListener('keydown', e => {
   } else if (e.code === 'KeyG') startDemo();
 }, true);
 renderer.domElement.addEventListener('pointerdown', () => { if (SNS) { startAudio(); setMusic(true); } else stopDemo(); });   // SNS 版はクリックで音を出す（止めない）
+{ const b = document.createElement('button'); b.textContent = '▶ ガイドツアー SNS版（縦長・約1分）'; b.style.borderColor = '#9fff9f'; b.onclick = () => { location.search = '?sns'; }; warp.prepend(b); }
 { const b = document.createElement('button'); b.textContent = '▶ ガイドツアー（G）'; b.style.borderColor = '#9fff9f'; b.style.fontWeight = '700'; b.onclick = () => { b.blur(); startDemo(); }; warp.prepend(b); }
 
 // ===== 起動 =====
