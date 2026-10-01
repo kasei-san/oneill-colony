@@ -187,7 +187,10 @@ function patch(mat, opts = {}) {
       sh.uniforms.uTime = U.uTime;
       // 風: 高い所ほど大きく、木ごとに位相をずらして揺らす（単位座標なので幹の根元は動かない）
       sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
-        { float ph = dot(instanceMatrix[3].xyz, vec3(0.013, 0.017, 0.011));
+        { float ph = 0.0;
+        #ifdef USE_INSTANCING
+          ph = dot(instanceMatrix[3].xyz, vec3(0.013, 0.017, 0.011));   // 木ごとに揺れの位相をずらす
+        #endif
           float sw = (sin(uTime * 1.3 + ph) * 0.6 + sin(uTime * 3.1 + ph * 2.7) * 0.25) * position.y * position.y;
           transformed.x += sw * 0.05; transformed.z += sw * 0.035 * cos(uTime * 0.7 + ph); }`);
     }
@@ -789,6 +792,7 @@ function build() {
   }
 
   buildElevators();
+  buildLandmarks();
 
   // 中心軸の構造物
   const spine = new THREE.Mesh(new THREE.CylinderGeometry(14, 14, L, 16, 1, true).rotateX(Math.PI / 2), M.steel);
@@ -1002,6 +1006,181 @@ function updateElevators(t) {
 // ===== コロニーの外: 自転・外殻・宇宙船の入口・誘導灯・外の宇宙船 =====
 // コロニーは遠心力で1Gになる角速度で自転する。描画上はコロニーを止めて、宇宙側（星・誘導灯・外の船・宇宙カメラ）を逆に回す
 const OMEGA = Math.sqrt(9.8 / R);                    // 約0.057 rad/s（約110秒で1回転）
+
+// ===== 観光名所: 無重力パーク・逆さ滝・リング大観覧車 =====
+const ZG_Z = 2500;                                    // 無重力パークの軸方向の位置
+const LM = {};
+function frameAt(th) {                                // 円筒上の局所フレーム（x=東, y=上, z=北）の回転行列
+  return new THREE.Matrix4().makeBasis(new THREE.Vector3(-Math.sin(th), Math.cos(th), 0), new THREE.Vector3(-Math.cos(th), -Math.sin(th), 0), new THREE.Vector3(0, 0, 1));
+}
+function buildLandmarks() {
+  // --- 1. 無重力パーク: 中心軸を包む直径500mのガラス球。中に浮島・水の玉・漂う人
+  {
+    const g = new THREE.Group(); g.position.z = ZG_Z;
+    const glass = new THREE.Mesh(new THREE.SphereGeometry(250, 48, 32), new THREE.MeshBasicMaterial({ color: 0xbfe3ff, transparent: true, opacity: 0.1, depthWrite: false, side: THREE.DoubleSide }));
+    g.add(glass);
+    const ribM = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.8, 0.85, 0.9) });
+    for (let i = 0; i < 6; i++) g.add(new THREE.Mesh(new THREE.TorusGeometry(250, 1.2, 6, 96), ribM).rotateY(i / 6 * Math.PI));
+    g.add(new THREE.Mesh(new THREE.TorusGeometry(250, 1.6, 6, 96), ribM));
+    LM.zgLightM = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.6, 0.7, 0.8) });
+    g.add(new THREE.Mesh(new THREE.TorusGeometry(252, 2.2, 6, 128).rotateY(Math.PI / 2), LM.zgLightM));
+    // 浮島（草の玉＋外向きに生えた木）
+    const islandM = patch(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }));
+    const islands = [];
+    LM.zgFloat = [];
+    for (let i = 0; i < 9; i++) {
+      const isl = new THREE.Group(), rad = rr(8, 18);
+      const geo = new THREE.IcosahedronGeometry(rad, 1);
+      const col = new Float32Array(geo.attributes.position.count * 3);
+      for (let v = 0; v < geo.attributes.position.count; v++) { const up = geo.attributes.position.getY(v) > -rad * 0.2; col.set(up ? [0.35, 0.6, 0.25] : [0.45, 0.33, 0.22], v * 3); }
+      geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      isl.add(new THREE.Mesh(geo, islandM));
+      for (let k = 0; k < 6; k++) {
+        const dir = new THREE.Vector3(rr(-1, 1), rr(0.2, 1), rr(-1, 1)).normalize();
+        const t = new THREE.Mesh(GEO.tree, M.tree); t.scale.setScalar(rr(6, 10));
+        t.position.copy(dir).multiplyScalar(rad * 0.92); t.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+        isl.add(t);
+      }
+      g.add(isl); islands.push(isl);
+      LM.zgFloat.push({ o: isl, c: new THREE.Vector3(rr(-140, 140), rr(-140, 140), rr(-140, 140)), a: rr(10, 30), w: rr(0.02, 0.05), ph: rand() * TAU, spin: new THREE.Vector3(rr(-0.05, 0.05), rr(-0.05, 0.05), rr(-0.05, 0.05)) });
+    }
+    // 水の玉
+    const waterM = new THREE.MeshStandardMaterial({ color: 0x6fb6e8, roughness: 0.05, metalness: 0.1, transparent: true, opacity: 0.65 });
+    for (let i = 0; i < 26; i++) {
+      const b = new THREE.Mesh(new THREE.SphereGeometry(rr(2, 7), 16, 12), waterM);
+      g.add(b);
+      LM.zgFloat.push({ o: b, c: new THREE.Vector3(rr(-180, 180), rr(-180, 180), rr(-180, 180)), a: rr(5, 20), w: rr(0.03, 0.08), ph: rand() * TAU, wob: true });
+    }
+    // 漂う人（手足を広げた形）
+    const pg = mergeGeometries([vcol(new THREE.BoxGeometry(0.45, 0.65, 0.28).translate(0, 0.3, 0), [1, 1, 1]), vcol(new THREE.BoxGeometry(0.22, 0.24, 0.22).translate(0, 0.78, 0), [1.4, 1.1, 0.9]),
+      vcol(new THREE.BoxGeometry(1.5, 0.12, 0.12).translate(0, 0.5, 0), [1.4, 1.1, 0.9]), vcol(new THREE.BoxGeometry(0.12, 0.85, 0.12).rotateZ(0.35).translate(-0.25, -0.35, 0), [0.25, 0.27, 0.35]), vcol(new THREE.BoxGeometry(0.12, 0.85, 0.12).rotateZ(-0.35).translate(0.25, -0.35, 0), [0.25, 0.27, 0.35])]);
+    const NP = 220;
+    LM.zgPeople = new THREE.InstancedMesh(pg, patch(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 })), NP);
+    const shirts = [0xe8463a, 0x2f6fd8, 0xf2c230, 0xf4f4f4, 0x4caf50, 0xd8448a, 0x8a4fc8, 0xf08a24, 0x17a2d8];
+    LM.zgP = [];
+    for (let i = 0; i < NP; i++) {
+      LM.zgPeople.setColorAt(i, new THREE.Color(pick(shirts)));
+      LM.zgP.push({ c: new THREE.Vector3(rr(-200, 200), rr(-200, 200), rr(-200, 200)).clampLength(20, 210), ax: new THREE.Vector3(rr(-1, 1), rr(-1, 1), rr(-1, 1)).normalize(), r: rr(3, 25), w: rr(0.05, 0.2), ph: rand() * TAU, sc: rr(1.6, 2.2) });
+    }
+    LM.zgPeople.frustumCulled = false;
+    g.add(LM.zgPeople);
+    scene.add(g);
+  }
+  // --- 2. 逆さ滝: 地上から軸へ噴き上げた水が、コロニーの自転のせいで曲がって落ちる（コリオリの力）
+  {
+    const k = 1, pk = landmarks.parks[1][1];
+    const f = LM.fountain = { k, s: pk.s, z: pk.z };
+    const th0 = STRIP_PHI[k] + f.s / R;
+    const base = new THREE.Group();
+    base.applyMatrix4(frameAt(th0)); base.position.copy(cyl(R, th0, f.z));
+    const stone = patch(new THREE.MeshStandardMaterial({ color: 0xd8d2c4, roughness: 0.7 }));
+    base.add(new THREE.Mesh(new THREE.CylinderGeometry(42, 46, 1.2, 48).translate(0, 0.6, 0), stone));         // 池の縁
+    base.add(new THREE.Mesh(new THREE.CylinderGeometry(40, 40, 0.4, 48).translate(0, 1.0, 0), M.water));      // 池
+    base.add(new THREE.Mesh(new THREE.CylinderGeometry(3.5, 6, 18, 16).translate(0, 9, 0), stone));           // 噴出塔
+    LM.fLightM = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.7, 0.8, 0.9) });
+    base.add(new THREE.Mesh(new THREE.TorusGeometry(40, 0.6, 6, 64).rotateX(Math.PI / 2).translate(0, 1.3, 0), LM.fLightM));
+    scene.add(base);
+    // 水滴（慣性系で直線運動 → 回転系に戻して表示）
+    const N = LOW ? 2500 : 6000;
+    const pos = new Float32Array(N * 3);
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+    LM.fMat = new THREE.PointsMaterial({ color: new THREE.Color(0.85, 0.93, 1.0), size: 2.2, transparent: true, opacity: 0.75, depthWrite: false });
+    const pts = new THREE.Points(g, LM.fMat); pts.frustumCulled = false;
+    scene.add(pts);
+    const v = 82, wr = OMEGA * R;
+    f.T = 2 * R * v / (v * v + wr * wr);               // 地面に戻るまでの時間
+    f.drops = Array.from({ length: N }, () => ({ ph: rand(), dv: rr(-1.5, 1.5), de: rr(-1.2, 1.2), dz: rr(-1.2, 1.2) }));
+    Object.assign(f, { pts, pos, th0, v, wr, top: 18 });
+  }
+  // --- 3. リング大観覧車: 窓の上の橋のわきに立つ直径240mの観覧車。てっぺんから足元のガラス越しに宇宙が見える
+  {
+    const th = WIN_PHI[1], zb = BRIDGE_Z[3], zw = zb + 34;
+    LM.wheel = { th, zb };
+    const root = new THREE.Group();
+    root.applyMatrix4(frameAt(th)); root.position.copy(cyl(R, th, zw));
+    const steel = patch(new THREE.MeshStandardMaterial({ color: 0xeef1f5, roughness: 0.35, metalness: 0.5 }));
+    const RAD = 120, HUB = 150;
+    // 支柱（ガラス面から立ち上がるA字の脚）
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 3, 1, 8), steel);
+      const a = new THREE.Vector3(sx * 70, -(GLASS_R - R), sz * 14), b = new THREE.Vector3(0, HUB, sz * 6);
+      leg.position.copy(a).add(b).multiplyScalar(0.5); leg.scale.y = a.distanceTo(b);
+      leg.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize());
+      root.add(leg);
+    }
+    const wheel = new THREE.Group(); wheel.position.y = HUB;
+    for (const dz of [-5, 5]) wheel.add(new THREE.Mesh(new THREE.TorusGeometry(RAD, 1.6, 8, 160).translate(0, 0, dz), steel));
+    for (let i = 0; i < 32; i++) wheel.add(new THREE.Mesh(new THREE.BoxGeometry(RAD, 0.8, 0.8).translate(RAD / 2, 0, 0).rotateZ(i / 32 * TAU), steel));
+    wheel.add(new THREE.Mesh(new THREE.CylinderGeometry(6, 6, 16, 16).rotateX(Math.PI / 2), steel));
+    // 外周の電飾（夜は色が流れる）
+    const NL = 192, lp = new Float32Array(NL * 3), lc = new Float32Array(NL * 3);
+    for (let i = 0; i < NL; i++) { const a = i / NL * TAU; lp.set([Math.cos(a) * (RAD + 2), Math.sin(a) * (RAD + 2), 0], i * 3); }
+    const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.BufferAttribute(lp, 3)); lg.setAttribute('color', new THREE.BufferAttribute(lc, 3));
+    LM.wLights = new THREE.Points(lg, new THREE.PointsMaterial({ size: 3, vertexColors: true, sizeAttenuation: true }));
+    wheel.add(LM.wLights);
+    root.add(wheel);
+    // ゴンドラ（常に「下」＝外向きにぶら下がる）
+    const NG = 32, gcols = [0xe8463a, 0xf2c230, 0x2f6fd8, 0x4caf50, 0xd8448a, 0x17a2d8, 0xf08a24, 0x8a4fc8];
+    const gg = mergeGeometries([vcol(new THREE.BoxGeometry(7, 6, 7).translate(0, -5, 0), [1, 1, 1]), vcol(new THREE.BoxGeometry(7.2, 2.4, 7.2).translate(0, -4, 0), [0.25, 0.32, 0.4]), vcol(new THREE.BoxGeometry(0.6, 2, 0.6).translate(0, -1, 0), [0.8, 0.8, 0.8])]);
+    LM.gond = new THREE.InstancedMesh(gg, patch(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0.2 })), NG);
+    for (let i = 0; i < NG; i++) LM.gond.setColorAt(i, new THREE.Color(gcols[i % gcols.length]));
+    LM.gond.frustumCulled = false;
+    root.add(LM.gond);
+    Object.assign(LM.wheel, { wheel, RAD, HUB, NG, NL, lc });
+    scene.add(root);
+  }
+}
+const _lm = new THREE.Matrix4(), _lq = new THREE.Quaternion(), _lv = new THREE.Vector3(), _ls = new THREE.Vector3(1, 1, 1);
+function updateLandmarks(t) {
+  const night = U.uNight.value;
+  // 無重力パーク
+  for (const f of LM.zgFloat) {
+    f.o.position.set(f.c.x + Math.sin(t * f.w + f.ph) * f.a, f.c.y + Math.cos(t * f.w * 0.8 + f.ph) * f.a, f.c.z + Math.sin(t * f.w * 0.6 + f.ph * 2) * f.a);
+    if (f.spin) f.o.rotation.set(t * f.spin.x, t * f.spin.y, t * f.spin.z);
+    if (f.wob) f.o.scale.set(1 + 0.08 * Math.sin(t * 2 + f.ph), 1 - 0.06 * Math.sin(t * 2 + f.ph), 1 + 0.05 * Math.cos(t * 1.7 + f.ph));
+  }
+  LM.zgP.forEach((p, i) => {
+    _lv.set(Math.cos(t * p.w + p.ph), Math.sin(t * p.w + p.ph), 0).multiplyScalar(p.r).applyAxisAngle(p.ax, p.ph);
+    _lq.setFromAxisAngle(p.ax, t * p.w * 1.7 + p.ph);
+    _lm.compose(_lv.add(p.c), _lq, _ls.setScalar(p.sc));
+    LM.zgPeople.setMatrixAt(i, _lm);
+  });
+  LM.zgPeople.instanceMatrix.needsUpdate = true;
+  LM.zgLightM.color.setRGB(0.6 + 3 * night, 0.7 + 4 * night, 0.8 + 6 * night);
+  // 逆さ滝
+  const f = LM.fountain, c0 = Math.cos(f.th0), s0 = Math.sin(f.th0);
+  const inV = [-c0, -s0], eV = [-s0, c0];
+  for (let i = 0; i < f.drops.length; i++) {
+    const d = f.drops[i], tt = ((t / f.T + d.ph) % 1) * f.T, vv = f.v + d.dv;
+    const r0 = R - f.top;
+    // 慣性系: 位置 = 噴出口 + 速度×時間（速度 = 上向き vv ＋ 地面の回転速度 ωr ＋ ばらつき）
+    const px = r0 * c0 + (inV[0] * vv + eV[0] * (OMEGA * r0 + d.de)) * tt;
+    const py = r0 * s0 + (inV[1] * vv + eV[1] * (OMEGA * r0 + d.de)) * tt;
+    // 回転系（コロニー）に戻す: -ωt 回転
+    const a = -OMEGA * tt, ca = Math.cos(a), sa = Math.sin(a);
+    let x = px * ca - py * sa, y = px * sa + py * ca;
+    if (x * x + y * y > R * R) { x = y = 0; }       // 地面より下は隠す
+    f.pos[i * 3] = x; f.pos[i * 3 + 1] = y; f.pos[i * 3 + 2] = f.z + d.dz * tt;
+  }
+  f.pts.geometry.attributes.position.needsUpdate = true;
+  LM.fMat.color.setRGB(0.85 + 0.6 * night, 0.93 + 0.2 * night, 1.0 + 1.6 * night);
+  LM.fLightM.color.setRGB(0.7 + 4 * night, 0.8 + 3 * night, 0.9 + 6 * night);
+  // 観覧車
+  const w = LM.wheel, rot = t * 0.025;
+  w.wheel.rotation.z = rot;
+  for (let i = 0; i < w.NG; i++) {
+    const a = rot + i / w.NG * TAU;
+    _lm.makeTranslation(Math.cos(a) * w.RAD, w.HUB + Math.sin(a) * w.RAD, 0);
+    LM.gond.setMatrixAt(i, _lm);
+  }
+  LM.gond.instanceMatrix.needsUpdate = true;
+  for (let i = 0; i < w.NL; i++) {
+    const hue = (i / w.NL * 3 - t * 0.15) % 1;
+    const c = new THREE.Color().setHSL((hue + 1) % 1, 0.9, 0.55).multiplyScalar(0.4 + 4 * night);
+    w.lc.set([c.r, c.g, c.b], i * 3);
+  }
+  LM.wLights.geometry.attributes.color.needsUpdate = true;
+}
 const spaceFrame = new THREE.Group(); scene.add(spaceFrame);
 const space = { on: false, mode: 'overview', az: 0.6, tilt: 2.2, dist: 26000, tz: -HL * 0.25 };
 const ENTRY_Z = -HL - 420;                            // 入口（-z 端の外側ドックの正面）
@@ -2105,6 +2284,9 @@ const PRESETS = [
   ['超高層ビルの屋上', () => { const t = landmarks.tallest[0]; go(STRIP_PHI[0] + t.s / R, t.z + t.d / 2 - 1, t.h + 3, 0, -0.3); }],
   ['上空 1500m', () => go(STRIP_PHI[0], -2000, 1500, 0, -0.05)],
   ['中心軸のそば（無重力帯）', () => go(STRIP_PHI[0], -HL + 1200, R - 80, 0, 0)],
+  ['★ 無重力パーク（中心軸）', () => go(STRIP_PHI[0], ZG_Z - 600, R - 330, 0, 0.45)],
+  ['★ 逆さ滝', () => { const f = LM.fountain; go(STRIP_PHI[f.k] + (f.s - 330) / R, f.z - 120, EYE, Math.PI / 2 - 0.3, 0.55); }],
+  ['★ リング大観覧車', () => { const w = LM.wheel; go(w.th + 0.02, BRIDGE_Z[3] + 600, 60, Math.PI + 0.12, 0.35); }],
   ['宇宙港の出口（船の航路）', () => go(STRIP_PHI[0] + 0.2, -HL + 450, R - 360, 0.1, 0.12)],
 ];
 const warp = document.getElementById('warp');
@@ -2178,6 +2360,7 @@ function frame() {
   updateVehicles(elapsed);
   updateShips(elapsed);
   updateElevators(elapsed);
+  updateLandmarks(elapsed);
   updateAxisTrains(elapsed);
   updateLocalLife(dt, elapsed);
   updateBirds(dt, elapsed);

@@ -15,7 +15,7 @@ const browser = await chromium.launch({ channel: 'chrome', headless: true, args:
 const page = await browser.newPage({ viewport: { width: 1280, height: 760 } });
 let errors = 0;
 page.on('pageerror', e => { errors++; console.log('[pageerror]', e.message); });
-page.on('console', m => { if (m.type() === 'error' && !m.text().includes('404')) { errors++; console.log('[console]', m.text().slice(0, 400)); } });
+page.on('console', m => { if (m.type() === 'error' && !m.text().includes('404')) { errors++; console.log('[console]', m.text().slice(0, 4000)); } });
 await page.goto(`http://localhost:${port}/index.html`);
 await page.waitForFunction(() => window.__ready === true, null, { timeout: 120000 });
 
