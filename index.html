@@ -86,6 +86,8 @@ const BRIDGE_Z = [];
 for (let j = 6; j < NZ - 1; j += 10) BRIDGE_Z.push(zCenter(j) + P / 2);
 const RIVER_I = [7, 20, 10];
 const RESORT = { k: 1, i0: NS - 6, j0: 35, j1: 42 };
+// 拡張境界地区: 開発の時代ごとに街並みが変わる。-z 側から 開拓期の家並み → 増設された商業区 → 新しい高層ビル街 の順に並ぶ
+const ERA = { k: 1, i0: 2, i1: 11, j0: 95, oldEnd: 98, midEnd: 101, j1: 106 };
 const RIVERSIDE = { k: 2, j0: 74, j1: 82 };                  // 屋台が並ぶ川沿い（川の両岸の遊歩道、9ブロック分）
 const RIVER_HW = 32;                                          // 川の水面の半幅（両岸に遊歩道を残す）   // 観覧車と遊園地のエリア（第2陸地の東端）
 
@@ -590,6 +592,7 @@ function genStrip(k) {
     let type;
     if (Math.abs(s) < P && terms.some(t => Math.abs(z - t.z) < P)) type = 'plaza';     // ターミナルの4隅は駅ビル
     else if (RESORT.k === k && i >= RESORT.i0 && j >= RESORT.j0 && j <= RESORT.j1) type = 'resort';
+    else if (ERA.k === k && i >= ERA.i0 && i <= ERA.i1 && j >= ERA.j0 && j <= ERA.j1) type = j <= ERA.oldEnd ? 'eraOld' : j <= ERA.midEnd ? 'eraMid' : 'eraNew';
     else if (i === river) type = 'river';
     else if (i === 0 || i === NS - 1) type = 'park';
     else if (bigParks.some(p => i >= p.i0 && i <= p.i1 && j >= p.j0 && j <= p.j1)) type = 'park';
@@ -665,6 +668,38 @@ function genStrip(k) {
       addB(ch, s, z - 34, 84, 18, 0, rr(24, 36), 0xf4f4f0); addB(ch, s, z + 34, 84, 18, 0, rr(14, 22), 0xeceae4);
       addB(ch, s - 34, z, 18, 50, 0, 18, 0xf0eee8); addB(ch, s + 34, z, 18, 50, 0, 18, 0xf0eee8);
       for (let n = 0; n < 6; n++) addTree(ch, s + rr(-16, 16), z + rr(-16, 16), rr(6, 9));
+      continue;
+    }
+    if (type === 'eraOld') {                         // 開拓期（2084年〜）: 低い家がひしめく。くすんだ外壁とトタン屋根
+      rect('#7d7262', s, z, BLK + 16, BLK + 16); rect('#968a76', s, z, BLK, BLK);
+      for (let a = 0; a < 5; a++) for (let b = 0; b < 5; b++) {
+        const cs = s + (a - 2) * 18.5 + rr(-1, 1), cz = z + (b - 2) * 18.5 + rr(-1, 1), w = rr(10, 14), d = rr(10, 14), h = rr(3.6, 5.5);
+        addB(ch, cs, cz, w, d, 0, h, pick([0x9a8a72, 0xb0a08a, 0x7a6a58, 0x8f8478, 0xa8927a]), false);
+        const rc = pick([0x7a4a33, 0x8a6a4a, 0x6a6f74, 0x8c5a3a, 0x5f6a70]);
+        ch.roof.push(th(cs), cz, h, w * 1.05, rr(1.0, 1.8), d * 1.05, rc); rect(hexCss(rc), cs, cz, w, d);
+        if (rand() < 0.2) addB(ch, cs + rr(-3, 3), cz + rr(-3, 3), 1.6, 1.6, h, 1.6, 0x8a8f96, false);   // 屋上の貯水タンク
+      }
+      if (j === ERA.oldEnd) for (let x = -BLK / 2; x < BLK / 2; x += 34) addB(ch, s + x + 12, z + BLK / 2 + 2.5, 24, 0.5, 0, 2.6, 0x8a8f96, false); // 旧境界フェンスの名残
+      continue;
+    }
+    if (type === 'eraMid') {                         // 第1拡張期（2089年〜）: 増設された商業区。色とりどりの4〜6階建て
+      rect('#4a4d52', s, z, BLK + 16, BLK + 16); rect('#b5ab98', s, z, BLK, BLK);
+      for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) {
+        const cs = s + (a - 1) * 31, cz = z + (b - 1) * 31;
+        addB(ch, cs, cz, rr(24, 28), rr(24, 28), 0, (4 + Math.floor(rand() * 3)) * 3.5, pick(PAL.shop));
+      }
+      if (j === ERA.midEnd) for (let x = -BLK / 2; x < BLK / 2; x += 8) addB(ch, s + x + 4, z + BLK / 2 + 3, 0.4, 0.4, 0, 1.0, 0xd8a531, false); // 新街区との境の車止め
+      continue;
+    }
+    if (type === 'eraNew') {                         // 第2拡張期（2092年〜）: 白とガラスの高層ビル。足元は明るい広場
+      rect('#3a4250', s, z, BLK + 16, BLK + 16); rect('#d8dde2', s, z, BLK, BLK);
+      const two = rand() < 0.5;
+      for (let a = 0; a < (two ? 2 : 1); a++) {
+        const cs = s + (two ? (a - 0.5) * 44 : 0), w = two ? rr(28, 36) : rr(44, 60), h = rr(90, 190);
+        addB(ch, cs, z, w, w * rr(0.8, 1.1), 0, h, pick([0xe8f0f8, 0x9fc8e8, 0x6fa8d8, 0xd8e8f4, 0x8ab8d8]));
+        addB(ch, cs, z, w * 0.7, w * 0.7, h, rr(4, 10), 0xeef4fa);
+      }
+      for (let n = 0; n < 6; n++) addTree(ch, s + rr(-42, 42), z + (rand() < 0.5 ? -40 : 40), rr(6, 8));
       continue;
     }
     if (type === 'forest') {                         // 鎮守の森（寺社のまわりの深い森）
@@ -2187,8 +2222,8 @@ function typeAt(th, z) {
   const t = blockTypes[k][i * NZ + j];
   return t === 'river' && k === RIVERSIDE.k && j >= RIVERSIDE.j0 && j <= RIVERSIDE.j1 ? 'riverside' : t;
 }
-const CAR_D = { forest: 0.05, school: 0.2, shop: 0.3, factory: 0.4, campus: 0.4, temple: 0.1, farm: 0.08, danchi: 0.25, plaza: 0.6, down: 1, mid: 0.55, res: 0.2, park: 0.1, river: 0.08, resort: 0.35, riverside: 0.15 };
-const PED_D = { forest: 0.1, school: 0.5, shop: 1, factory: 0.08, campus: 0.4, temple: 0.25, farm: 0.03, danchi: 0.3, plaza: 1, down: 1, mid: 0.45, res: 0.12, park: 0.3, river: 0.05, resort: 1, riverside: 1 };
+const CAR_D = { eraOld: 0.15, eraMid: 0.5, eraNew: 0.6, forest: 0.05, school: 0.2, shop: 0.3, factory: 0.4, campus: 0.4, temple: 0.1, farm: 0.08, danchi: 0.25, plaza: 0.6, down: 1, mid: 0.55, res: 0.2, park: 0.1, river: 0.08, resort: 0.35, riverside: 0.15 };
+const PED_D = { eraOld: 0.4, eraMid: 1, eraNew: 0.6, forest: 0.1, school: 0.5, shop: 1, factory: 0.08, campus: 0.4, temple: 0.25, farm: 0.03, danchi: 0.3, plaza: 1, down: 1, mid: 0.45, res: 0.12, park: 0.3, river: 0.05, resort: 1, riverside: 1 };
 const local = { cars: [], peds: [] };
 const LC = { n: LOW ? 250 : 600, r: 700 }, LP = { n: LOW ? 600 : 1600, r: 320 };
 let localCarMeshes, pedBodyMesh, pedSkinMesh;
@@ -3026,6 +3061,7 @@ const PRESETS = [
   ['中心軸のそば（無重力帯）', () => go(STRIP_PHI[0], -HL + 1200, R - 80, 0, 0)],
   ['地上の電車の駅', () => go(STATIONS.ring[0] + 60 / RING_R, BRIDGE_Z[7] + 40, 26, Math.PI + 0.2, 0.05)],
   ['ターミナル駅（線路の交差点）', () => { const ts = landmarks.terminals[0], t = ts.find(x => x.kind === 'office') || ts[0]; go(STRIP_PHI[0] + 160 / R, t.z - 260, 45, -0.45, 0.12); }],
+  ['★ 拡張境界地区', () => { const sc = sCenter((ERA.i0 + ERA.i1) / 2); go(STRIP_PHI[ERA.k] + sc / R, zCenter(ERA.j0) - 60, 38, 0, -0.18); }],
   ['★ 歓楽街', () => { const n = landmarks.neonSpot || landmarks.cbd[0][0]; go(STRIP_PHI[0] + (Math.round(n.s / P) * P + 6.5) / R, n.z - 150, 30, 0, 0.32); }],
   ['★ 中心軸の駅（見上げる）', () => go(STRIP_PHI[0] + 0.25, HUB_Z - 700, 120, 0, 1.0)],
   ['★ 中心軸の駅（間近）', () => go(STRIP_PHI[0] + 0.62, HUB_Z - 750, R - 520, 0.35, 0.42)],
@@ -3154,6 +3190,8 @@ const SHOTS = [
   { ch: '街区', t: '歓楽街', x: '昼間は少し静かな歓楽街なのだ。ビルの壁には看板がびっしり、大型スクリーンには広告が流れているのだ。本番は夜――あとで戻ってくるのだ。', dur: 13,
     from: preset('★ 歓楽街'), d: { z: 120, h: -10 } },
   { ch: '街区', t: '商店街', x: '発展しなかった駅の前には、アーケードのかかった昔ながらの商店街が残っているのだ。色とりどりの小さな店が並び、いつも人でにぎわっているのだ。', dur: 12, from: () => { const p = landmarks.shopSta || landmarks.samples.shop; go(STRIP_PHI[p.k] + p.s / R, p.z - 54, 3.2, 0, 0.03); }, d: { z: 75 } },   // アーケードの屋根の下を歩く
+  { ch: '街区', t: '拡張境界地区', x: 'コロニーの街は、宇宙港のある端から奥へ少しずつ広がってきたのだ。ここでは、手前の開拓期のトタン屋根の家並み、増設された色とりどりの商業区、新しい白い高層ビル街が、一続きに並んでいるのだ。道路の色が変わるところが、時代の境目なのだ。', dur: 16,
+    from: () => { const sc = sCenter((ERA.i0 + ERA.i1) / 2); lookAt(ERA.k, sc, zCenter(ERA.j0) - 60, sc, zCenter(ERA.midEnd), 38, 0.9); }, d: { z: 260, h: 12 } },
   { ch: '街区', t: '寺社と鎮守の森', x: 'コロニーの人々は、地球から神様もいっしょに連れてきたのだ。朱色の鳥居と鎮守の森が、住宅地の中に静かにたたずんでいるのだ。', dur: 11, from: () => { const t = landmarks.samples.temple, n = t.ns || { s: t.s + 110, z: t.z }, dx = n.s - t.s, dz = n.z - t.z, L = Math.hypot(dx, dz) || 1; lookAt(t.k, t.s - dx / L * 120, t.z - dz / L * 120, t.s + dx * 0.5, t.z + dz * 0.5, 38, 0.7); }, d: { h: -6 } },  // 寺社の向こうに歓楽街
   { ch: '街区', t: '工場と倉庫街', x: '窓際には、コロニーの暮らしを支える工場や倉庫が集まっているのだ。トラックが行き交う「街の裏側」なのだ。', dur: 11, from: atSample('factory', 55, 60), d: { z: 60, yaw: 0.15 } },
   { ch: '街区', t: '農業区画', x: '両端の蓋の近くには、畑とガラスの温室が広がっているのだ。300万人の食べ物の多くは、このコロニーの中で育てているのだ。', dur: 12, from: () => { const sp = landmarks.samples.farm; lookAt(sp.k, sp.s, sp.z - 80, sp.s, sp.z - 500, 55, 0.75); }, d: { z: -90, yaw: 0.12 } },   // 畑の中から蓋の方（一面の畑）を向く
