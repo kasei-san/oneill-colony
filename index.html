@@ -22,11 +22,29 @@
   #mapbox .cap { margin-bottom: 4px; color: #b9c4d0; }
   #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: #cfe0f5; font-size: 16px; background: #000; z-index: 10; }
   .hidden { display: none !important; }
-  #demo-cap { position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); width: min(820px, calc(100% - 32px)); color: #f2f6fb; text-shadow: 0 1px 3px rgba(0,0,0,0.8);
-    background: linear-gradient(180deg, rgba(6,10,20,0.15), rgba(6,10,20,0.72)); border-radius: 10px; padding: 14px 20px 16px; transition: opacity 0.9s; opacity: 0; pointer-events: none; }
-  #demo-cap .ch { font-size: 12px; letter-spacing: 0.12em; color: #9fd0ff; }
-  #demo-cap h2 { margin: 4px 0 6px; font-size: 22px; font-weight: 700; }
-  #demo-cap p { margin: 0; font-size: 15px; line-height: 1.75; }
+  /* ガイドツアーの字幕: 左上に大きなタイトル（背景なし）、右下に解説（少し遅れて出る） */
+  #demo-cap { position: fixed; inset: 0; color: #f6f9fc; transition: opacity 0.9s; opacity: 0; pointer-events: none; font-family: "Hiragino Sans", system-ui, sans-serif; }
+  #demo-cap .ch { position: absolute; left: clamp(20px, 3.2vw, 56px); top: clamp(18px, 3vw, 48px); font-size: clamp(13px, 1.25vw, 20px); letter-spacing: 0.25em; color: #a8d8ff; font-weight: 700;
+    text-shadow: 0 1px 6px rgba(0,0,0,0.85); }
+  #demo-cap h2 { position: absolute; left: clamp(20px, 3.2vw, 56px); top: calc(clamp(18px, 3vw, 48px) + clamp(18px, 1.9vw, 30px)); margin: 0; white-space: nowrap;
+    font-size: clamp(32px, 4.4vw, 72px); font-weight: 900; letter-spacing: 0.03em; line-height: 1.15; text-shadow: 0 2px 4px rgba(0,0,0,0.7), 0 4px 22px rgba(0,0,0,0.55); }
+  #demo-cap p { position: absolute; right: clamp(16px, 2.4vw, 40px); bottom: clamp(56px, 6vw, 84px); margin: 0; width: min(24em, 42vw); padding: 0.9em 1.1em;
+    font-size: clamp(15px, 1.35vw, 21px); line-height: 1.8; font-weight: 600; background: rgba(6,10,20,0.55); border-radius: 12px; backdrop-filter: blur(6px);
+    text-shadow: 0 1px 3px rgba(0,0,0,0.6); transition: opacity 0.9s; opacity: 0; }
+  #sns-frame { position: fixed; display: none; pointer-events: none; font-size: 100px; }
+  .sns #sns-frame { display: block; }
+  #sns-top, #sns-bot { position: absolute; left: 0; right: 0; background: #000; color: #fff; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; font-family: "Hiragino Sans", system-ui, sans-serif; }
+  #sns-top { top: 0; height: 15%; }
+  #sns-bot { bottom: 0; height: 21%; }
+  #sns-top .ch { font-size: 0.30em; letter-spacing: 0.2em; color: #8fd0ff; margin-bottom: 0.12em; }
+  #sns-top .t { font-size: 0.78em; font-weight: 800; letter-spacing: 0.04em; }
+  #sns-bot .x { font-size: 0.50em; font-weight: 700; line-height: 1.5; padding: 0 0.5em; }
+  #sns-top > *, #sns-bot > * { transition: opacity 0.5s; }
+  .sns #demo-cap, .sns .panel, .rec #demo-bar { display: none !important; }
+  .sns #demo-bar { right: auto; left: 12px; bottom: 12px; }
+  .sns #demo-stop { display: none; }   /* 動作確認用: 縦長の枠の外（左下）に操作ボタン */
+  .rec #sns-top > *, .rec #sns-bot > *, .rec #demo-fade { transition: none !important; }
+  html.sns, html.sns body { background: #111; }
   #demo-fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; transition: opacity 0.8s; }
   #demo-bar { position: fixed; right: 16px; bottom: 10px; color: #c8d4e2; font-size: 12px; background: rgba(6,10,20,0.65); padding: 4px 6px 4px 10px; border-radius: 8px; display: flex; align-items: center; gap: 6px; }
   #demo-bar button { background: rgba(255,255,255,0.1); color: #e6edf5; border: 1px solid rgba(255,255,255,0.25); border-radius: 5px; min-width: 30px; height: 26px; font-size: 13px; cursor: pointer; }
@@ -55,6 +73,7 @@
   </div>
 </div>
 <div id="warp" class="panel"></div>
+<div id="sns-frame"><div id="sns-top"><div class="ch"></div><div class="t"></div></div><div id="sns-bot"><div class="x"></div></div></div>
 <div id="demo-fade"></div>
 <div id="demo-cap"><div class="ch"></div><h2></h2><p></p></div>
 <div id="demo-bar" class="hidden"><span id="demo-pos"></span><button id="demo-prev" title="前へ（←）">⏮</button><button id="demo-pause" title="一時停止（Space）">⏸</button><button id="demo-next" title="次へ（→）">⏭</button><button id="demo-stop" title="終了（Esc）">✕</button></div>
@@ -70,6 +89,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
 const LOW = new URLSearchParams(location.search).get('q') === 'low';
+const REC = new URLSearchParams(location.search).has('rec');   // 動画の書き出し用。window.__frame(dt) で1コマずつ進める
 
 // ===== コロニー寸法（メートル）。軸は Z、遠心「重力」は軸から外向き =====
 const R = 3000, L = 16000, HL = L / 2;
@@ -116,10 +136,32 @@ const boxMatrix = (th, z, h0, w, ht, d) => { writeBox(_m.elements, 0, th, z, h0,
 const cyl = (r, th, z) => new THREE.Vector3(r * Math.cos(th), r * Math.sin(th), z);
 
 // ===== レンダラ =====
-const renderer = new THREE.WebGLRenderer({ antialias: false, logarithmicDepthBuffer: true, powerPreference: 'high-performance' });
+const renderer = new THREE.WebGLRenderer({ preserveDrawingBuffer: REC, antialias: false, logarithmicDepthBuffer: true, powerPreference: 'high-performance' });
 renderer.domElement.id = 'view';
 renderer.setPixelRatio(Math.min(devicePixelRatio, LOW ? 1 : 1.5));
-renderer.setSize(innerWidth, innerHeight);
+// ?sns: スマホ縦長（9:16）のダイジェスト版。上下に黒帯（上=街区名、下=解説）
+const SNS = new URLSearchParams(location.search).has('sns') || (innerHeight > innerWidth * 1.1 && !new URLSearchParams(location.search).has('pc'));   // 縦長の画面（スマホなど）は自動で SNS 版。?pc で通常版
+const SNS_TOP = 0.15, SNS_BOT = 0.21;                      // 枠の高さに対する上下の帯の割合
+function snsFrame() {
+  let h = innerHeight, w = Math.round(h * 9 / 16);
+  if (w > innerWidth) { w = innerWidth; h = REC ? Math.round(w * 16 / 9) : innerHeight; }   // 9:16 より縦長のスマホは画面いっぱい（動画の書き出しは 9:16 のまま）
+  return { x: Math.round((innerWidth - w) / 2), y: Math.round((innerHeight - h) / 2), w, h };
+}
+function viewSize() {
+  if (!SNS) return { w: innerWidth, h: innerHeight };
+  const f = snsFrame(); return { w: f.w, h: Math.round(f.h * (1 - SNS_TOP - SNS_BOT)) };
+}
+function layoutView() {
+  const v = viewSize();
+  renderer.setSize(v.w, v.h);
+  if (SNS) {
+    const f = snsFrame(), c = renderer.domElement.style;
+    c.position = 'fixed'; c.left = f.x + 'px'; c.top = Math.round(f.y + f.h * SNS_TOP) + 'px';
+    const st = document.getElementById('sns-frame').style;
+    Object.assign(st, { left: f.x + 'px', top: f.y + 'px', width: f.w + 'px', height: f.h + 'px', fontSize: (f.w / 1080 * 100) + 'px' });
+  }
+}
+layoutView();
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 renderer.shadowMap.enabled = true;
@@ -130,7 +172,7 @@ const ANISO = renderer.capabilities.getMaxAnisotropy();
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
 scene.fog = new THREE.FogExp2(new THREE.Color(0xbcd0e8), 3.3e-4); // 密度は colonyFog の「地表換算距離」に掛ける係数
-const camera = new THREE.PerspectiveCamera(80, innerWidth / innerHeight, 0.5, 600000); // 遠くの僚コロニーまで描くため遠め
+const camera = new THREE.PerspectiveCamera(SNS ? 70 : 80, viewSize().w / viewSize().h, 0.5, 600000); // 遠くの僚コロニーまで描くため遠め
 
 // ===== 照明: 各陸地は「向かいの窓」から鏡で反射した太陽光を受ける =====
 const sunL = STRIP_PHI.map(p => new THREE.Vector3(-Math.cos(p), -Math.sin(p), 0)
@@ -307,9 +349,11 @@ function patch(mat, opts = {}) {
           float mx = smoothstep(wx0 - fw.x, wx0 + fw.x, f.x) - smoothstep(wx1 - fw.x, wx1 + fw.x, f.x);
           float my = smoothstep(wy0 - fw.y, wy0 + fw.y, f.y) - smoothstep(wy1 - fw.y, wy1 + fw.y, f.y);
           float m = clamp(mx, 0.0, 1.0) * clamp(my, 0.0, 1.0);
+          ${opts.vehicle ? 'const float yardT = 0.0;' : `float yardT = step(length(vCW.xy), 300.0) * step(abs(vCW.z - (${NEW_YARD_Z.toFixed(1)})), 290.0) * step(vBS.y, 90.0);`}   // 新造船所の工場の建物（背の高い事務所ビルは除く）
+          m *= mix(1.0, step(0.84, bHash(vec3(floor(g), vBId * 17.0))), yardT);   // 工場は窓がちょこちょこあるだけ
           m *= step(1.0, halfW - abs(hc)) * step(vBL.y, vBS.y - 1.0); // 角と屋上の縁には窓を作らない
           float lod = smoothstep(0.35, 0.9, max(fw.x, fw.y));
-          winMask = mix(m, 0.42, lod);
+          winMask = mix(m, mix(0.42, 0.07, yardT), lod);
           // 窓の奥の部屋（interior mapping）: 窓セルの奥に箱部屋があるとしてレイを飛ばす
           if (m > 0.01 && lod < 0.99) {
             vec3 dv = normalize(vVL);
@@ -334,13 +378,14 @@ function patch(mat, opts = {}) {
             vec3 farRoom = vec3(0.75, 0.6, 0.42) * (0.5 + 0.6 * bHash(vec3(cid + 7.0, vBId * 13.0))) * mix(0.6, onF * 1.5, uNight);
             winRoom = mix(winRoom, farRoom, lod); }
           float rnd = bHash(vec3(floor(g), vBId * 57.0));
-          diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.16, 0.19, 0.24), vec3(0.42, 0.47, 0.54), rnd * rnd) * mix(1.0, 0.45, oldT), winMask);
+          diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.16, 0.19, 0.24), vec3(0.42, 0.47, 0.54), rnd * rnd) * mix(1.0, 0.72, oldT), winMask);
           if (oldT > 0.5) {
+            diffuseColor.rgb /= 0.88 + 0.22 * vBId; diffuseColor.rgb *= 0.95 + 0.1 * vBId;   // 建物ごとの明るさのばらつきを小さく
             // 鉄格子（窓の中の縦の棒）と、上から垂れた汚れの筋
             float bar = 1.0 - smoothstep(0.0, max(fw.x * 1.5, 0.02), abs(fract(f.x * 3.0) - 0.5) - 0.42);
             winMask *= 1.0 - 0.8 * bar * (1.0 - lod); winRoom *= 1.0 - 0.8 * bar;
             float streak = bNoise(vec2(hc * 0.9 + vBId * 31.0, vBL.y * 0.04)) * bNoise(vec2(hc * 0.23, vBL.y * 0.15 + vBId * 7.0));
-            diffuseColor.rgb *= 1.0 - 0.45 * smoothstep(0.15, 0.55, streak) * (1.0 - winMask);
+            diffuseColor.rgb *= 1.0 - 0.22 * smoothstep(0.15, 0.55, streak) * (1.0 - winMask);   // 汚れの筋（控えめ）
           }
           // 角・屋上の縁を明るく（面取りの代わり）
           float eDist = min(halfW - abs(hc), vBS.y - vBL.y);
@@ -557,8 +602,15 @@ function genStrip(k) {
   for (let n = 0; n < 3; n++) { let s; do { s = rr(-900, 900); } while (Math.abs(s - sCenter(river)) < 250); cbds.push({ s, z: -6000 + n * 6000 + rr(-1500, 1500) }); }
   const bigParks = [];
   for (let n = 0; n < 2; n++) {
-    let i0; do { i0 = 2 + Math.floor(rand() * (NS - 7)); } while (river >= i0 - 1 && river <= i0 + 4);
-    bigParks.push({ i0, i1: i0 + 3, j0: 52 + n * 38 + Math.floor(rand() * 22), nj: 5 });   // 新市街の中（旧市街の境目より奥）
+    // 川・駅前広場（線路の交差点）・エレベーター駅のまわりの密集地と重ならない場所を選ぶ
+    let i0, j0, tries = 0;
+    do {
+      i0 = 2 + Math.floor(rand() * (NS - 7)); j0 = 52 + n * 38 + Math.floor(rand() * 22);
+      const zs = zCenter(j0) - P, ze = zCenter(j0 + 4) + P, ss = sCenter(i0) - P, se = sCenter(i0 + 3) + P;
+      var bad = (river >= i0 - 1 && river <= i0 + 4) || BRIDGE_Z.some(Z => Z > zs && Z < ze && ss < P && se > -P)
+        || [NEW_YARD_Z, HUB_Z, ZG_Z].some(Z => ze > Z - 420 && zs < Z + 420 && se > -420 && ss < 420) || (RESORT.k === k && i0 + 3 >= RESORT.i0 && j0 + 4 >= RESORT.j0 && j0 <= RESORT.j1);
+    } while (bad && ++tries < 200);
+    bigParks.push({ i0, i1: i0 + 3, j0, nj: 5 });   // 新市街の中（旧市街の境目より奥）
   }
   bigParks.forEach(p => { p.j1 = p.j0 + p.nj - 1; });
   const cbdF = (s, z) => Math.max(...cbds.map(c => Math.exp(-(((z - c.z) / 1600) ** 2) - (((s - c.s) / 650) ** 2))));
@@ -566,6 +618,8 @@ function genStrip(k) {
   // 横線路（環状線）と縦線路（陸地中央の高架線）の交差点＝ターミナル駅。性格はランダム:
   // 4割 オフィス街 / 2割5分 歓楽街 / 残りは発展していない（まわりは元の住宅地や公園のまま）
   const terms = BRIDGE_Z.map(zb => { const r = rand(); return { z: zb, kind: r < 0.4 ? 'office' : r < 0.65 ? 'neon' : 'plain', r: rr(260, 420) }; });
+  const ELEV_ZS = [NEW_YARD_Z, HUB_Z, ZG_Z];
+  for (const t of terms) if (ELEV_ZS.includes(t.z)) { t.kind = 'office'; t.r = 480; t.elev = true; }   // エレベーターの真下のターミナルは大きく発展
   (landmarks.terminals ??= [])[k] = terms;
   const nearPlainTerm = (s, z) => terms.some(t => t.kind === 'plain' && Math.hypot(s, z - t.z) < 260);
   landmarks.samples ??= {};
@@ -582,8 +636,13 @@ function genStrip(k) {
 
   const th = s => phi + s / R;
   const rect = (col, s, z, w, d) => { g.fillStyle = col; g.fillRect(s - w / 2, z - d / 2, w, d); };
+  // エレベーター（軸の3駅）の真下のターミナルに近いほどビルを高く（多少ランダム）。上に載る部分は土台と同じ倍率
+  let hScale = 1;
+  const elevF = (s, z) => Math.max(0, ...[NEW_YARD_Z, HUB_Z, ZG_Z].map(Z => 1 - Math.hypot(s, z - Z) / 520)) ** 1.4;
   const addB = (ch, s, z, w, d, h0, h, col, flatTop = true) => {
-    if (neonBlk && rand() < 0.75) col = pick(PAL.cyber);           // 歓楽街は暗め・色付きの外壁
+    if (h0 === 0) hScale = (curType === 'down' || curType === 'mid') && h > 18 ? 1 + 1.6 * elevF(s, z) * rr(0.55, 1.15) : 1;
+    h0 *= hScale; h *= hScale;
+    if (neonBlk && curType !== 'oldtown' && rand() < 0.75) col = pick(PAL.cyber);   // 旧市街は看板だけ付けて色は変えない           // 歓楽街は暗め・色付きの外壁
     if (neonBlk && h0 === 0 && h >= 8) signs.push([th(s), z, w, d, h, curType === 'oldtown']);
     const rec = [th(s), z, h0, w, h, d, col];
     ch.bld.push(...rec);
@@ -610,6 +669,7 @@ function genStrip(k) {
     let type;
     if (Math.abs(s) < P && terms.some(t => Math.abs(z - t.z) < P)) type = 'plaza';     // ターミナルの4隅は駅ビル
     else if (RESORT.k === k && i >= RESORT.i0 && j >= RESORT.j0 && j <= RESORT.j1) type = 'resort';
+    else if (Math.abs(s) < 360 && ELEV_ZS.some(Z => Math.abs(z - Z) < 360) && rand() < 0.92) type = 'down';   // エレベーター駅のまわりは街区の種類に関係なくビルを密集
     else if (i === river) type = 'river';
     else if (i === 0 || i === NS - 1) type = 'park';
     else if (bigParks.some(p => i >= p.i0 && i <= p.i1 && j >= p.j0 && j <= p.j1)) type = 'park';
@@ -659,7 +719,7 @@ function genStrip(k) {
     if (type === 'factory') {                        // 工場: のこぎり屋根の建屋・事務棟・タンク群・パイプラック・煙突・駐車場
       rect('#8f8c86', s, z, BLK, BLK);
       const variant = rand();
-      if (variant < 0.2) {                             // 球形のガスタンク基地（直径24〜34mの球を脚で支える）
+      if (variant < 0.12) {                            // 球形のガスタンク基地（直径24〜34mの球を脚で支える）
         rect('#9a968e', s, z, BLK, BLK);
         const n = rand() < 0.5 ? 2 : 3;
         for (let q = 0; q < n; q++) {
@@ -671,7 +731,7 @@ function genStrip(k) {
         ch.cyl.push(th(s + 36), z + 34, 0, 18, 30, 18, 0xc8ccd0);                          // 円筒のガスホルダー
         continue;
       }
-      if (variant < 0.4) {                             // 発電所: 窓のない大きなタービン建屋、煙突2〜3本、冷却塔
+      if (variant < 0.24) {                            // 発電所: 窓のない大きなタービン建屋、煙突2〜3本、冷却塔
         rect('#8a8680', s, z, BLK, BLK);
         addPlain(ch, s - 14, z - 10, 50, 64, 0, rr(22, 30), pick([0xb8bcc0, 0xa8acb0, 0xc0b8a8]));
         addPlain(ch, s - 14, z - 10, 30, 40, 26, 8, 0x8a9098);
@@ -679,7 +739,7 @@ function genStrip(k) {
         ch.cooling.push(th(s + 26), z + 28, 0, 34, rr(45, 60), 34, 0xd8d4cc);
         continue;
       }
-      if (variant < 0.6) {                             // 窓のない倉庫群（物流倉庫）
+      if (variant < 0.4) {                             // 窓のない倉庫群（物流倉庫）
         rect('#8f8c86', s, z, BLK, BLK);
         for (let q = 0; q < 2; q++) {
           const wh = rr(10, 18), x = s + (q - 0.5) * 44;
@@ -730,7 +790,7 @@ function genStrip(k) {
         if (rand() < 0.06) continue;                                  // ところどころ細い路地
         const cs = s + (a - 1.5) * 23.5 + rr(-0.6, 0.6), cz = z + (b - 1.5) * 23.5 + rr(-0.6, 0.6);
         const w = rr(20.5, 23), d = rr(20.5, 23), h = (8 + Math.floor(rand() * 7)) * 3 + rr(-0.5, 0.5);
-        const col = new THREE.Color(pick([0x6a5e50, 0x5e564c, 0x72685a, 0x585450, 0x6a625a, 0x5a6058, 0x7a6a58, 0x605a54, 0x6e5a4a])).multiplyScalar(rr(1.0, 1.25)).getHex();   // 引きで見ても沈みすぎない明るさ
+        const col = new THREE.Color(pick([0xa89e8c, 0xa29c92, 0xaca290, 0xa09e98, 0xa8a196, 0x9fa29a, 0xaea290])).multiplyScalar(rr(0.84, 0.9)).getHex();   // 明るさをそろえ、新市街の白より少しだけ濃く   // 灰色やベージュ（新市街の白いビルとの差は残す）
         addB(ch, cs, cz, w, d, 0, h, col);
         for (let n = Math.floor(rr(1, 4)); n > 0; n--) {             // 屋上に増築された小屋
           const bh = rr(2.2, 3.6), x = cs + rr(-w / 3, w / 3), y = cz + rr(-d / 3, d / 3);
@@ -1066,7 +1126,39 @@ function build() {
         for (const dz of [-8, 8]) misc.push(a, zb + dz, -(GLASS_R - R), 1.2, GLASS_R - R - 2.5, 1.2);
     }
   }
+  // 高架の上の線路: 電車の走る位置（環状線は z±2m、陸地中央の高架線は s±2m）にレール2本と枕木
+  const rails = new GeoBuilder(), ties = [];
+  for (const zb of BRIDGE_Z) for (const tz of [-2, 2]) for (const dz of [-0.75, 0.75]) rails.ringBand(R - 16.18, R - 16, zb + tz + dz - 0.08, zb + tz + dz + 0.08, 0, TAU, 360);
+  for (const zb of BRIDGE_Z) for (let a = 0; a < TAU; a += 2.5 / (R - 16)) for (const tz of [-2, 2]) ties.push(a, zb + tz, 16, 0.25, 0.1, 2.3);
+  for (let k = 0; k < 3; k++) for (const ts of [-2, 2]) {
+    const th = STRIP_PHI[k] + ts / R;
+    for (const ds of [-0.75, 0.75]) misc.push(th + ds / R, 0, 8, 0.16, 0.18, L - 60);           // 軸方向のレール
+    for (let z = -HL + 30; z < HL - 30; z += 2.5) ties.push(th, z, 8, 2.3, 0.1, 0.25);
+  }
+  const railMesh = new THREE.Mesh(rails.geo(), M.steel);
+  const tieMesh = instanced(GEO.box, patch(new THREE.MeshStandardMaterial({ color: 0x5a4a3c, roughness: 0.9 })), ties, 6, { color: false, cast: false });
+  scene.add(railMesh, tieMesh);
   const concMesh = new THREE.Mesh(conc.geo(), M.concrete); concMesh.receiveShadow = concMesh.castShadow = true;
+  // 窓側のエレベーター駅（軸の3駅の真下の橋）のまわり: 橋と同じ高さで窓ガラスの上に張り出す駐車場デッキ
+  const park = [], parkCars = [], parkLines = [];
+  for (const Z of [NEW_YARD_Z, HUB_Z, ZG_Z]) for (const psi of WIN_PHI) for (const side of [-1, 1]) {
+    const zc = Z + side * 70, wS = 150, dZ = 100;                     // デッキ: 周方向150m × 軸方向100m（橋の両側）
+    deck.ringBand(R, R + 2.5, zc - dZ / 2, zc + dZ / 2, psi + (side < 0 ? 0.004 : 0.004) - wS / 2 / R, psi + wS / 2 / R, 24);
+    for (const ds of [-60, -20, 20, 60]) for (const dz of [-38, 38]) park.push(psi + ds / R, zc + dz, -(GLASS_R - R), 2, GLASS_R - R - 2.5, 2, 0x9aa0a8);   // ガラスまでの支柱
+    for (let row = 0; row < 3; row++) for (let c = 0; c < 22; c++) {
+      const ds = -62 + c * 5.9, dz = -36 + row * 30 + (side > 0 ? 6 : -6);
+      parkLines.push(psi + (ds - 2.95) / R, zc + dz, 0.02, 0.15, 0.05, 5.4, 0xf0f0f0);
+      if (rand() < 0.75) parkCars.push(psi + ds / R, zc + dz + (row % 2 ? 0.3 : -0.3), 0, 1, 1, 1, pick(PAL.car));
+    }
+    if (side > 0) {                                                    // 管理棟（デッキの端、窓の上に建つ小さなビル）
+      park.push(psi + 52 / R, zc + 30, 0, 22, 16, 18, 0xe8ecf0);
+      park.push(psi + 52 / R, zc + 30, 16, 14, 4, 10, 0xc8d4de);
+    }
+  }
+  scene.add(instanced(GEO.box, M.bld, park, 7, { cast: false }), instanced(GEO.box, M.detail, parkLines, 7, { cast: false }));
+  { const pm = new THREE.InstancedMesh(GEO.car, M.carShape, parkCars.length / 7);
+    for (let q = 0; q < parkCars.length / 7; q++) { writeCar(pm.instanceMatrix.array, q * 16, parkCars[q * 7], parkCars[q * 7 + 1], false, q % 2 ? 1 : -1); pm.setColorAt(q, new THREE.Color(parkCars[q * 7 + 6])); }
+    pm.computeBoundingSphere(); scene.add(pm); }
   const deckMesh = new THREE.Mesh(deck.geo(), M.deck); deckMesh.receiveShadow = deckMesh.castShadow = true;
   const miscMesh = instanced(GEO.box, M.concrete, misc, 6, { color: false });
   scene.add(concMesh, deckMesh, miscMesh);
@@ -1139,6 +1231,7 @@ function build() {
   buildElevators();
   buildLandmarks();
   buildHubStation();
+  buildShipyards();
 
   // 中心軸の構造物
   const spine = new THREE.Mesh(new THREE.CylinderGeometry(14, 14, L, 16, 1, true).rotateX(Math.PI / 2), M.steel);
@@ -1192,7 +1285,7 @@ function build() {
         // 正反射の向き（反射光はコロニーの窓へ入るので外からはほぼ見えない）＋ 太陽に照らされた鏡面の明るいにじみ
         float lit = max(dot(normalize(vMN), vec3(0.0, 0.0, 1.0)), 0.0);
         outgoingLight += vec3(1.0, 0.95, 0.85) * (pow(g, 80.0) * 6.0 + pow(g, 3.0) * 0.9 * lit + lit * 0.35) * uMirrorSun;
-        outgoingLight += vec3(1.0, 0.96, 0.88) * uMirrorSpace * (lit * 5.0 + pow(g, 2.0) * 6.0 + pow(g, 30.0) * 20.0); // 宇宙からの全景では太陽光を照り返してビカビカ光る
+        outgoingLight += vec3(1.0, 0.96, 0.88) * uMirrorSpace * (lit * 1.6 + pow(g, 2.0) * 1.8 + pow(g, 30.0) * 6.0); // 宇宙からの全景では太陽光を照り返して光る（強すぎると白飛びする）
       }
       #include <opaque_fragment>`);
   };
@@ -1366,12 +1459,157 @@ function updateElevators(t) {
 const OMEGA = Math.sqrt(9.8 / R);                    // 約0.057 rad/s（約110秒で1回転）
 
 // ===== 観光名所: 無重力パーク・逆さ滝・リング大観覧車 =====
-const ZG_Z = 2500;                                    // 無重力パークの軸方向の位置
+const ZG_Z = BRIDGE_Z[9];                             // 無重力パーク（環状線の z に合わせ、真下がターミナル駅になる）
+// 軸ぞいの並び: 宇宙港（-z 端）→ 新造船所（NEW_YARD_Z）→ 旧造船所＝今の中央駅（HUB_Z）→ 無重力パーク（ZG_Z）
+const NEW_YARD_Z = BRIDGE_Z[3];                       // 新造船所（同上）
+const HUB_CRANES = [[0.9, -170], [0.9 + Math.PI, 160], [2.5, -60], [4.2, 90], [5.6, -230], [1.7, 220]];   // 旧造船所のクレーン（角度, HUB_Z からのずれ）
+const HUB_RINGS = [-330, 330], HUB_RING_R = 250;   // 古い船台のオレンジの輪
+const hubSurfR = dz => 90 + 150 * Math.max(0, 1 - (dz / 280) ** 2) * 0.6;   // 中央駅の巣の表面のおおよその半径（クレーンやスポークを刺す位置）
+const yard = { sparks: [], ship: null };
+// 造りかけの船体: 竜骨・肋骨（四角い枠）・前から一部だけ張った外板。長さ len、軸は +z
+function hullSkeleton(len, wid, ribCol, plateCol, plated) {
+  const parts = [], n = Math.floor(len / 12);
+  parts.push(vcol(new THREE.BoxGeometry(3, 3, len), new THREE.Color(ribCol).toArray()));
+  for (let i = 0; i <= n; i++) {
+    const z = -len / 2 + i * len / n, w = wid * (1 - Math.pow(Math.abs(i / n - 0.5) * 2, 3) * 0.5), c = new THREE.Color(ribCol).toArray();
+    parts.push(vcol(new THREE.BoxGeometry(w, 1.2, 1.2).translate(0, w / 2, z), c), vcol(new THREE.BoxGeometry(w, 1.2, 1.2).translate(0, -w / 2, z), c));
+    parts.push(vcol(new THREE.BoxGeometry(1.2, w, 1.2).translate(w / 2, 0, z), c), vcol(new THREE.BoxGeometry(1.2, w, 1.2).translate(-w / 2, 0, z), c));
+    if (i / n > 1 - plated) {                             // 前の方だけ外板を張り終えている
+      const p = new THREE.Color(plateCol).toArray(), segL = len / n + 0.4;
+      parts.push(vcol(new THREE.BoxGeometry(w + 1, 0.6, segL).translate(0, w / 2 + 0.6, z - len / n / 2), p), vcol(new THREE.BoxGeometry(w + 1, 0.6, segL).translate(0, -w / 2 - 0.6, z - len / n / 2), p));
+      parts.push(vcol(new THREE.BoxGeometry(0.6, w + 1, segL).translate(w / 2 + 0.6, 0, z - len / n / 2), p), vcol(new THREE.BoxGeometry(0.6, w + 1, segL).translate(-w / 2 - 0.6, 0, z - len / n / 2), p));
+    }
+  }
+  return mergeGeometries(parts);
+}
+function buildShipyards() {
+  const steel = patch(new THREE.MeshStandardMaterial({ color: 0xc8ccd2, roughness: 0.45, metalness: 0.5 }));
+  const vmat = patch(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.4 }));
+  // --- 新造船所: 軸を囲む骨組みのかご（半径230m・長さ520m）。中で船を2隻組み立て中。完成した船が宇宙港へ出ていく
+  const g = new THREE.Group(); g.position.z = NEW_YARD_Z;
+  for (let z = -260; z <= 260; z += 104) g.add(new THREE.Mesh(new THREE.TorusGeometry(230, 3.5, 6, 96).translate(0, 0, z), steel));
+  for (let i = 0; i < 16; i++) { const a = i / 16 * TAU, b = new THREE.Mesh(new THREE.BoxGeometry(5, 5, 520), steel); b.position.set(Math.cos(a) * 230, Math.sin(a) * 230, 0); g.add(b); }
+  for (const z of [-260, 260]) for (let i = 0; i < 8; i++) {                // 両端の内側へ向かう支え（軸の構造に固定）
+    const a = (i + 0.5) / 8 * TAU, b = new THREE.Mesh(new THREE.BoxGeometry(170, 3, 3).translate(145, 0, z), steel); b.rotation.z = a; g.add(b);
+  }
+  const hull = hullSkeleton(200, 30, 0x9aa0a8, 0x2f6fd8, 0.45), hull2 = hullSkeleton(150, 24, 0x9aa0a8, 0xe8463a, 0.2);
+  for (const [geo, a, r] of [[hull, 0.75, 140], [hull2, 0.75 + Math.PI, 150]]) {
+    const m = new THREE.Mesh(geo, vmat); m.position.set(Math.cos(a) * r, Math.sin(a) * r, 0); g.add(m);
+    for (const dz of [-60, 0, 60]) { const arm = new THREE.Mesh(new THREE.BoxGeometry(230 - r, 2.2, 2.2).translate((230 - r) / 2, 0, 0), new THREE.MeshStandardMaterial({ color: 0xf2c230 })); arm.position.set(Math.cos(a) * r, Math.sin(a) * r, dz); arm.rotation.z = a; g.add(arm); } // 船を支えるアーム
+    for (let k = 0; k < 14; k++) yard.sparks.push({ p: new THREE.Vector3(Math.cos(a) * r + rr(-14, 14), Math.sin(a) * r + rr(-14, 14), NEW_YARD_Z + rr(-90, 90)), ph: rand() * 10 });
+  }
+  // 造船所の街: 駅・白い建物・物資の山・タンク。組み立て中の船（0.75 / 0.75+π）と進水待ちの船（0.75+π/2）のまわりは空ける
+  const free = a => [0.75, 0.75 + Math.PI, 0.75 + Math.PI / 2].every(b => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b))) > 0.42);
+  const mods = [], modsWin = [], crates = [], tanks = [], spheres = [], outs = [];
+  for (let n = 0; n < 160; n++) {                                     // 軸に張り付いた白い建物（窓があるのは2割ほど）
+    const a = rand() * TAU; if (!free(a)) continue;
+    const rIn = rr(62, 80), rOut = rIn + rr(20, 70), z = NEW_YARD_Z + rr(-240, 240), w = rr(14, 40), d = rr(14, 50);
+    mods.push(a, z, R - rOut, w, rOut - rIn, d, pick([0xf2f4f6, 0xe8ecf0, 0xdfe5ea, 0xf4f1ea, 0xc8d4de]));
+    outs.push([a, z, rOut, w, d]);
+  }
+  // 建物の外壁（外向きの面）に付けたタンク
+  for (const [a, z, rOut, w, d] of outs) {
+    if (rand() > 0.35) continue;
+    const dd = rr(6, Math.min(w, d) * 0.6), hh = dd * rr(1, 1.8);
+    if (rand() < 0.6) tanks.push(a, z, R - rOut - hh, dd, hh, dd, pick([0xe8e8e2, 0xd8d8d0, 0xc8ccd0, 0xd8a531]));
+    else spheres.push(a, z, R - rOut - dd * 0.9, dd, dd, dd, pick([0xe8e8e2, 0xd8dce0, 0xe8e0c8]));
+  }
+  // かごの長手の梁（16本）の内側に、コンテナとタンクを並べて固定
+  for (let b = 0; b < 16; b++) {
+    const a = b / 16 * TAU; if (!free(a)) continue;
+    for (let z = -230; z < 230; z += rr(30, 70)) {
+      if (rand() < 0.5) { let h = 0; for (let k = 0; k < 1 + Math.floor(rand() * 4); k++) { const hh = rr(3, 4.5); crates.push(a, NEW_YARD_Z + z, R - 227.5 + h, rr(10, 16), hh, rr(14, 30), pick([0xb8452f, 0x2f6fa8, 0xd8a531, 0x3d8a52, 0x8a8f96, 0xe2e2dc, 0x7a3f74, 0xf08a24])); h += hh; } }
+      else if (rand() < 0.4) { const dd = rr(8, 14); tanks.push(a, NEW_YARD_Z + z, R - 227.5, dd, dd * rr(1.2, 2), dd, pick([0xe8e8e2, 0xd8d8d0, 0xc8ccd0])); }
+    }
+  }
+  for (const [a, z] of [[0.75 + Math.PI / 2 + 0.9, -150], [0.75 - 0.9, 60], [0.75 + Math.PI + 0.9, 190]]) {   // 事務所の普通のビル（背が高く、窓が並ぶ）
+    modsWin.push(a, NEW_YARD_Z + z, R - 62 - 120, 26, 120, 30, pick([0xdfe5ea, 0xc8d4de, 0x9fb4c8]));
+  }
+  const crateMat = patch(new THREE.MeshStandardMaterial({ roughness: 0.7, metalness: 0.2 }));
+  scene.add(instanced(GEO.box, M.bld, mods, 7, { cast: false }), instanced(GEO.box, M.bld, modsWin, 7, { cast: false }), instanced(GEO.box, crateMat, crates, 7, { cast: false }),
+    instanced(GEO.cyl, M.tank, tanks, 7, { cast: false }), instanced(GEO.sph, M.tank, spheres, 7, { cast: false }));
+  // トラック: 梁の内側を走るもの（16本の梁のうち空いているもの）と、かごの中を飛ぶ無重力トラック
+  yard.trucks = [];
+  for (let b = 0; b < 16; b++) { const a = b / 16 * TAU; if (!free(a)) continue; for (let k = 0; k < 2; k++) yard.trucks.push({ a, r: 224.5, sc: 2.2, ph: rand(), sp: rr(0.025, 0.045), fly: false }); }
+  for (let k = 0; k < 10; k++) { let a; do { a = rand() * TAU; } while (!free(a)); yard.trucks.push({ a, r: rr(100, 200), sc: 3, ph: rand(), sp: rr(0.03, 0.06), fly: true, bob: rand() * TAU }); }
+  yard.truckMesh = new THREE.InstancedMesh(GEO.truck, M.carShape, yard.trucks.length);
+  yard.trucks.forEach((t, i) => yard.truckMesh.setColorAt(i, new THREE.Color(pick([0xf2c230, 0xf08a24, 0xe8e8e8, 0x2f6fd8, 0xc0392b]))));
+  yard.truckMesh.frustumCulled = false; scene.add(yard.truckMesh);
+  addAxisPlatforms(NEW_YARD_Z, 0xd8dce0);                              // 軸の電車の駅（造船所前）
+  // 投光器の光の点（かごの輪に沿って）
+  const lp = []; for (let z = -260; z <= 260; z += 104) for (let i = 0; i < 32; i++) { const a = i / 32 * TAU; lp.push(Math.cos(a) * 226, Math.sin(a) * 226, z); }
+  const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute(lp, 3));
+  g.add(new THREE.Points(lg, new THREE.PointsMaterial({ color: new THREE.Color(5, 4.4, 3.2), size: 3, sizeAttenuation: false })));
+  scene.add(g);
+  // 溶接の火花（青白く明滅）
+  const sg = new THREE.BufferGeometry(); sg.setAttribute('position', new THREE.Float32BufferAttribute(yard.sparks.flatMap(s => s.p.toArray()), 3));
+  yard.sparkMat = new THREE.PointsMaterial({ color: new THREE.Color(6, 7, 10), size: 5, sizeAttenuation: false, transparent: true });
+  yard.sparkPts = new THREE.Points(sg, yard.sparkMat); yard.sparkPts.frustumCulled = false; scene.add(yard.sparkPts);
+  // 完成した船（造船所を出て宇宙港の発着口へ向かう）
+  const parts = [vcol(new THREE.CylinderGeometry(15, 15, 140, 18).rotateX(Math.PI / 2), [0.95, 0.95, 0.97]), vcol(new THREE.SphereGeometry(15, 16, 10).scale(1, 1, 2).translate(0, 0, 70), [0.95, 0.95, 0.97]),
+    vcol(new THREE.BoxGeometry(31, 4, 120).translate(0, 0, -5), [0.18, 0.44, 0.85]), vcol(new THREE.BoxGeometry(10, 12, 24).translate(0, 16, 30), [0.85, 0.87, 0.9])];
+  yard.ship = new THREE.Mesh(mergeGeometries(parts), vmat); scene.add(yard.ship);
+  // 船首のリボン（進水を祝う）
+  const rib = new THREE.Mesh(new THREE.TorusGeometry(15.5, 1.2, 6, 24), new THREE.MeshBasicMaterial({ color: new THREE.Color(2.5, 0.3, 0.3) })); rib.position.z = 40; yard.ship.add(rib);
+
+  // --- 旧造船所の名残（今の中央駅）: 錆びた巨大クレーン2基、古い船台のリング、保存された造りかけの船体
+  const rust = patch(new THREE.MeshStandardMaterial({ color: 0x9a5a36, roughness: 0.9, metalness: 0.2 }));
+  for (const [a, dz] of HUB_CRANES) {
+    const c = new THREE.Group(); c.position.z = HUB_Z + dz; c.rotation.z = a;
+    const r0 = hubSurfR(dz) - 10;                                    // 巣の表面に刺さる付け根
+    c.add(new THREE.Mesh(new THREE.BoxGeometry(420 - r0, 9, 9).translate((r0 + 420) / 2, 0, 0), rust));   // 外へ張り出した腕
+    c.add(new THREE.Mesh(new THREE.BoxGeometry(16, 16, 16).translate(r0 + 4, 0, 0), rust));             // 付け根の基部
+    c.add(new THREE.Mesh(new THREE.BoxGeometry(9, 9, 120).translate(410, 0, -50), rust));            // 腕の先の吊り桁
+    c.add(new THREE.Mesh(new THREE.BoxGeometry(3, 3, 70).translate(410, 0, -140), new THREE.MeshStandardMaterial({ color: 0x3a3a3a })));
+    scene.add(c);
+  }
+  for (const dz of HUB_RINGS) {
+    scene.add(new THREE.Mesh(new THREE.TorusGeometry(HUB_RING_R, 6, 6, 96).translate(0, 0, HUB_Z + dz), rust));   // 古い船台のリング
+    for (let i = 0; i < 8; i++) {                                     // 輪から駅の端へ斜めに刺さるスポーク
+      const a = (i + 0.5) / 8 * TAU, zIn = Math.sign(dz) * 235, rIn = hubSurfR(zIn) - 8;
+      const p0 = new THREE.Vector3(Math.cos(a) * HUB_RING_R, Math.sin(a) * HUB_RING_R, HUB_Z + dz), p1 = new THREE.Vector3(Math.cos(a) * rIn, Math.sin(a) * rIn, HUB_Z + zIn);
+      const sp = new THREE.Mesh(new THREE.BoxGeometry(5, 5, p0.distanceTo(p1)), rust);
+      sp.position.copy(p0).add(p1).multiplyScalar(0.5); sp.lookAt(p1); scene.add(sp);
+    }
+  }
+  const relic = new THREE.Mesh(hullSkeleton(120, 26, 0x8a5a3a, 0x6a4a3a, 0.15), patch(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 })));
+  relic.position.set(Math.cos(2.3) * 150, Math.sin(2.3) * 150, HUB_Z + 380); scene.add(relic);   // 最初に造られた船の骨組み（記念に保存）
+}
+// 半径 r・角度 th・z に、前が ±z を向く乗り物を置く（上=軸の向き）
+function writeAtR(a, o, th, z, r, dir, sc) {
+  const c = Math.cos(th), s = Math.sin(th);
+  a.set([-s * dir * sc, c * dir * sc, 0, 0, -c * sc, -s * sc, 0, 0, 0, 0, dir * sc, 0, r * c, r * s, z, 1], o);
+}
+function updateShipyards(t) {
+  if (yard.truckMesh) {
+    const arr = yard.truckMesh.instanceMatrix.array;
+    yard.trucks.forEach((tr, i) => {
+      const u = (t * tr.sp + tr.ph) % 2, f = u < 1 ? u : 2 - u, e = f * f * (3 - 2 * f), dir = u < 1 ? 1 : -1;   // かごの端から端へ往復
+      const z = NEW_YARD_Z - 230 + 460 * e, r = tr.fly ? tr.r + 6 * Math.sin(t * 0.7 + tr.bob) : tr.r;
+      writeAtR(arr, i * 16, tr.a + (tr.fly ? 0.05 * Math.sin(t * 0.5 + tr.bob) : 0), z, r, dir, tr.sc);
+    });
+    yard.truckMesh.instanceMatrix.needsUpdate = true;
+  }
+  // 火花: ランダムに明滅
+  const pos = yard.sparkPts.geometry.attributes.position;
+  yard.sparks.forEach((s, i) => { const on = Math.sin(t * 23 + s.ph * 7) > 0.6; pos.setXYZ(i, on ? s.p.x : 0, on ? s.p.y : 0, on ? s.p.z : 1e7); });
+  pos.needsUpdate = true;
+  // 完成した船: 90秒周期。造船所で待機 → 外へ移って発着口の高さへ → 宇宙港へ進む → 発着口で消える
+  const u = (t % 90) / 90, a0 = 0.75 + Math.PI / 2, bay = 0.5 / 12 * TAU, s = yard.ship;
+  let r, a, z, vis = true;
+  if (u < 0.25) { r = 150; a = a0; z = NEW_YARD_Z; }
+  else if (u < 0.4) { const q = (u - 0.25) / 0.15, e = q * q * (3 - 2 * q); r = 150 + 150 * e; a = a0 + (bay - a0) * e; z = NEW_YARD_Z - 300 * e; }
+  else if (u < 0.85) { const q = (u - 0.4) / 0.45, e = q * q * (3 - 2 * q); r = 300; a = bay; z = NEW_YARD_Z - 300 + (-HL + 330 - NEW_YARD_Z + 300) * e; }
+  else { vis = false; r = 300; a = bay; z = -HL + 330; }
+  s.visible = vis; s.position.set(Math.cos(a) * r, Math.sin(a) * r, z); s.rotation.set(0, Math.PI, 0);
+}
 
 // ===== 中心軸の駅: 軸を包む構造物の塊（スズメバチの巣のよう）＋地面へ伸びるスポーク状のエレベーター＋ネオン看板 =====
-const HUB_Z = -500;
+const HUB_Z = BRIDGE_Z[6];                            // 中央駅（同上）
 const HUB_SPOKES = [];
-for (let k = 0; k < 3; k++) for (const d of [-0.25, 0.25]) HUB_SPOKES.push(STRIP_PHI[k] + d);   // 陸地ごとに2本、計6本
+for (let k = 0; k < 3; k++) HUB_SPOKES.push(STRIP_PHI[k], WIN_PHI[k]);   // 60°おきの6本: 陸地の中央（ターミナル駅の真上）と窓の中央（橋の上）
+// スポーク状のエレベーターがある場所（軸ぞいの3か所）: 軸方向の位置と、上端（軸からの半径）
+const SPOKE_SITES = [{ z: () => HUB_Z, r: 230 }, { z: () => NEW_YARD_Z, r: 232 }, { z: () => ZG_Z, r: 252 }];
 let hubCabMesh, hubNeonMat, hubWarn, hubWarnMat;
 function buildHubStation() {
   // 巣: 内側は軸の電車が通るので空け（半径80m〜240m）、外ほど低く・端ほど細る塊
@@ -1394,12 +1632,14 @@ function buildHubStation() {
 
   // スポーク（エレベーターのシャフト）: 巣の外側から地面まで。トラス風に柱4本＋横材
   const posts = [], braces = [], bases = [];
-  for (const th of HUB_SPOKES) {
-    const top = R - 230;
-    for (const [ds, dz] of [[-9, -9], [9, -9], [-9, 9], [9, 9]]) posts.push(th + ds / R, HUB_Z + dz, 0, 2.2, top, 2.2);
-    for (let h = 60; h < top; h += 60) { braces.push(th, HUB_Z - 9, h, 20, 1.2, 1.2); braces.push(th, HUB_Z + 9, h, 20, 1.2, 1.2); braces.push(th - 9 / R, HUB_Z, h + 30, 1.2, 1.2, 20); braces.push(th + 9 / R, HUB_Z, h + 30, 1.2, 1.2, 20); }
-    bases.push(th, HUB_Z, 0, 60, 26, 60, 0xb8bec6);                                               // 地上駅
-    bases.push(th, HUB_Z, 26, 40, 8, 40, 0x8a9099);
+  for (const site of SPOKE_SITES) for (const th of HUB_SPOKES) {
+    const Z = site.z(), top = R - site.r;
+    const DECK = 22;                                                   // 環状線の高架（〜20m）の上に載る駅のデッキ
+    for (const [ds, dz] of [[-9, -9], [9, -9], [-9, 9], [9, 9]]) posts.push(th + ds / R, Z + dz, DECK + 10, 2.2, top - DECK - 10, 2.2);
+    for (const [ds, dz] of [[-33, -33], [33, -33], [-33, 33], [33, 33]]) posts.push(th + ds / R, Z + dz, 0, 3, DECK, 3);   // デッキの脚
+    for (let h = DECK + 60; h < top; h += 60) { braces.push(th, Z - 9, h, 20, 1.2, 1.2); braces.push(th, Z + 9, h, 20, 1.2, 1.2); braces.push(th - 9 / R, Z, h + 30, 1.2, 1.2, 20); braces.push(th + 9 / R, Z, h + 30, 1.2, 1.2, 20); }
+    bases.push(th, Z, DECK, 74, 6, 74, 0xb8bec6);                                             // 駅のデッキ（線路をまたぐ）
+    bases.push(th, Z, DECK + 6, 44, 10, 44, 0xdfe5ea);                                        // エレベーターの乗り場
   }
   const trussM = patch(new THREE.MeshStandardMaterial({ color: 0xc8ccd2, roughness: 0.45, metalness: 0.5 }));
   scene.add(instanced(GEO.box, trussM, posts, 6, { color: false, cast: false }));
@@ -1407,23 +1647,23 @@ function buildHubStation() {
   scene.add(instanced(GEO.box, M.bld, bases, 7, { cast: false }));
   // 赤い警告灯（スポークの4隅の柱に150mおき。昼夜とわず点滅）
   const warn = [];
-  for (const th of HUB_SPOKES) for (let h = 40; h < R - 240; h += 150) for (const [ds, dz] of [[-10, -10], [10, 10]]) warn.push(th + ds / R, HUB_Z + dz, h, 6, 6, 6);
-  for (let n = 0; n < 48; n++) {                       // 駅本体（巣）の表面にも点々と
-    const zz = rr(-1, 1), r = 92 + 150 * (1 - zz * zz) * rr(0.85, 1.05);
-    warn.push(rand() * TAU, HUB_Z + zz * 255, R - r - 3, 5, 5, 5);
+  for (const site of SPOKE_SITES) for (const th of HUB_SPOKES) for (let h = 60; h < R - site.r - 10; h += 150) for (const [ds, dz] of [[-10, -10], [10, 10]]) warn.push(th + ds / R, site.z() + dz, h, 6, 6, 6);
+  for (const dz of HUB_RINGS) {                                        // オレンジの輪とスポークの先
+    for (let n = 0; n < 24; n++) warn.push(n / 24 * TAU, HUB_Z + dz, R - HUB_RING_R - 10, 9, 9, 9);
+    for (let i = 0; i < 8; i++) { const zIn = Math.sign(dz) * 235, rIn = hubSurfR(zIn); warn.push((i + 0.5) / 8 * TAU, HUB_Z + (dz + zIn) / 2, R - (HUB_RING_R + rIn) / 2 - 7, 7, 7, 7); }
   }
-  for (const dz of [-280, 280]) for (let n = 0; n < 12; n++) warn.push(n / 12 * TAU, HUB_Z + dz, R - 222, 5, 5, 5); // 両端のプラットフォームの縁
+  for (const [a, dz] of HUB_CRANES) for (const r of [330, 425]) warn.push(a, HUB_Z + dz, R - r - 9, 9, 9, 9);   // クレーンの腕の中ほどと先
   hubWarnMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(9, 0.25, 0.15), fog: false }); // 霞に負けず昼も見える
   hubWarn = instanced(new THREE.SphereGeometry(0.5, 8, 6), hubWarnMat, warn, 6, { color: false, cast: false });
   scene.add(hubWarn);
   // かご（各スポークに上り下り2台ずつ）
-  hubCabMesh = new THREE.InstancedMesh(GEO.box, patch(new THREE.MeshStandardMaterial({ color: 0xf2f4f6, roughness: 0.3, metalness: 0.3, emissive: 0xffc8f0, emissiveIntensity: 0.6 })), HUB_SPOKES.length * 2);
+  hubCabMesh = new THREE.InstancedMesh(GEO.box, patch(new THREE.MeshStandardMaterial({ color: 0xf2f4f6, roughness: 0.3, metalness: 0.3, emissive: 0xffc8f0, emissiveIntensity: 0.6 })), SPOKE_SITES.length * HUB_SPOKES.length * 2);
   hubCabMesh.frustumCulled = false;
   scene.add(hubCabMesh);
 
   // ネオン看板（蛍光色の文字を1枚の画像にまとめ、板に貼って巣の表面や柱にくっつける）
   const texts = [['コロニー中央駅', '#7ff9ff'], ['ZERO-G', '#ff4fd8'], ['ラーメン', '#ff5a3c'], ['HOTEL 無重力', '#b6ff4a'], ['居酒屋', '#ffcc33'], ['カラオケ', '#ff4fd8'],
-    ['回転寿司', '#7ff9ff'], ['BAR', '#ff5a3c'], ['CYBER', '#4ab0ff'], ['薬', '#4dff9c'], ['24H', '#ffcc33'], ['まんが喫茶', '#b6ff4a'], ['NEON', '#ff4fd8'], ['スシ', '#7ff9ff'], ['質', '#ffcc33'], ['宇宙港直通', '#4ab0ff']];
+    ['回転寿司', '#7ff9ff'], ['BAR', '#ff5a3c'], ['CYBER', '#4ab0ff'], ['薬', '#4dff9c'], ['24H', '#ffcc33'], ['まんが喫茶', '#b6ff4a'], ['NEON', '#ff4fd8'], ['スシ', '#7ff9ff'], ['旧造船所', '#ffcc33'], ['宇宙港直通', '#4ab0ff']];
   const [ac, ag] = canvas(1024, 1024);
   ag.clearRect(0, 0, 1024, 1024);
   texts.forEach(([t, c], i) => {
@@ -1458,13 +1698,16 @@ function buildHubStation() {
   scene.add(neon);
 }
 function updateHubStation(t) {
-  const a = hubCabMesh.instanceMatrix.array, top = R - 260;
-  HUB_SPOKES.forEach((th, i) => {
-    for (let c = 0; c < 2; c++) {
-      const u = (t / 90 + i * 0.37 + c * 0.5) % 1;
-      const q = u < 0.45 ? u / 0.45 : u < 0.5 ? 1 : u < 0.95 ? 1 - (u - 0.5) / 0.45 : 0;
-      writeBox(a, (i * 2 + c) * 16, th + (c ? 4.5 : -4.5) / R, HUB_Z, 30 + (top - 30) * q * q * (3 - 2 * q), 8, 12, 14);
-    }
+  const a = hubCabMesh.instanceMatrix.array;
+  SPOKE_SITES.forEach((site, si) => {
+    const top = R - site.r - 30, Z = site.z();
+    HUB_SPOKES.forEach((th, i) => {
+      for (let c = 0; c < 2; c++) {
+        const u = (t / 90 + i * 0.37 + si * 0.23 + c * 0.5) % 1;
+        const q = u < 0.45 ? u / 0.45 : u < 0.5 ? 1 : u < 0.95 ? 1 - (u - 0.5) / 0.45 : 0;
+        writeBox(a, ((si * HUB_SPOKES.length + i) * 2 + c) * 16, th + (c ? 4.5 : -4.5) / R, Z, 40 + (top - 40) * q * q * (3 - 2 * q), 8, 12, 14);
+      }
+    });
   });
   hubCabMesh.instanceMatrix.needsUpdate = true;
   hubWarn.visible = (t % 1.6) < 0.7;                     // 警告灯の点滅
@@ -2122,6 +2365,7 @@ function updateSpaceCamera() {
   camera.position.copy(spaceFrame.localToWorld(p));
   camera.up.set(0, 0, 1);
   if (space.target) { const tg = spaceFrame.localToWorld(new THREE.Vector3(...space.target)); camera.lookAt(tg); } else camera.lookAt(0, 0, space.tz);
+  if (camRoll) camera.rotateZ(camRoll);
 }
 const setSpaceDOF = on => { if (post.dofQuad) post.dofQuad.material.uniforms.uFocusCap.value = on ? Math.max(space.dist, 1001) : 150; };
 function toggleSpace() { space.on = !space.on; space.target = null; if (space.on) Object.assign(space, { mode: 'overview', az: 0.6, tilt: 1.0, dist: 30000, tz: -2000 }); /* 太陽側の斜め上から（ミラーの鏡面が見える） */ setSpaceDOF(space.on); envTimer = 99; }
@@ -2297,7 +2541,7 @@ function axisLapPos(tau, stops, span, v) {
 function updateAxisTrains(t) {
   const a = axisCarMesh.instanceMatrix.array, span = 2 * (HL - 150), z0 = -(HL - 150);
   axisTrains.forEach((tr, i) => {
-    const stops = [HUB_Z, ZG_Z].map(Z => tr.dir > 0 ? Z - z0 + 168 : -Z - z0 + 168).sort((p, q) => p - q); // 停車位置（編成の中央がホームに来るよう先頭をずらす）
+    const stops = [NEW_YARD_Z, HUB_Z, ZG_Z].map(Z => tr.dir > 0 ? Z - z0 + 168 : -Z - z0 + 168).sort((p, q) => p - q); // 停車位置（編成の中央がホームに来るよう先頭をずらす）
     const lapT = axisLapTime(span, tr.v, stops.length);
     const x = axisLapPos(((tr.ph * lapT + t) % lapT + lapT) % lapT, stops, span, tr.v);
     for (let c = 0; c < 8; c++) {
@@ -2748,7 +2992,7 @@ function buildClouds() {
 // ===== ポストエフェクト: 被写界深度（自動フォーカス）→ ブルーム → トーンマップ =====
 const post = { on: true };
 function makePost() {
-  const pr = renderer.getPixelRatio(), w = Math.floor(innerWidth * pr), h = Math.floor(innerHeight * pr);
+  const pr = renderer.getPixelRatio(), vs = viewSize(), w = Math.floor(vs.w * pr), h = Math.floor(vs.h * pr);
   post.sceneRT = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, samples: 4, depthTexture: new THREE.DepthTexture(w, h) });
   post.dofRT = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType });
   post.aoRT = new THREE.WebGLRenderTarget(w >> 1, h >> 1, { type: THREE.HalfFloatType, depthBuffer: false });
@@ -2950,6 +3194,7 @@ function buildRailStations() {
   const conc = [];
   for (let k = 0; k < 3; k++) for (const t of landmarks.terminals[k]) {
     const big = t.kind !== 'plain', w = big ? 70 : 34, h = big ? 18 : 9;
+    if (t.elev) for (const ss of [-1, 1]) for (const sz of [-1, 1]) conc.push(STRIP_PHI[k] + ss * (10 + w / 2) / R, t.z + sz * (10 + w / 2), h, 44, rr(110, 210), 44, pick([0x9fb4c8, 0xc8d4de, 0x6c8298, 0xdfe5ea]));   // 駅ビルの上に建つ高層ビル
     for (const ss of [-1, 1]) for (const sz of [-1, 1]) conc.push(STRIP_PHI[k] + ss * (8 + 2 + w / 2) / R, t.z + sz * (8 + 2 + w / 2), 0, w, h, w, big ? 0xdfe3e8 : 0xe8e2d4);
   }
   const m = patch(new THREE.MeshStandardMaterial({ roughness: 0.6 }));
@@ -3034,7 +3279,9 @@ function updateCamera() {
   camera.up.copy(up);
   const dir = V.tmp.copy(f).multiplyScalar(Math.cos(player.pitch)).addScaledVector(up, Math.sin(player.pitch));
   camera.lookAt(dir.add(camera.position));
+  if (camRoll) camera.rotateZ(camRoll);                 // ガイドツアーのロール（円筒が回って見える）
 }
+let camRoll = 0;
 
 let shadowHalf = 0;
 function updateSun() {
@@ -3185,14 +3432,21 @@ addEventListener('keydown', e => {
 addEventListener('keyup', e => keys.delete(e.code));
 addEventListener('blur', () => keys.clear());
 addEventListener('resize', () => {
-  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
+  camera.aspect = viewSize().w / viewSize().h; camera.updateProjectionMatrix();
+  layoutView();
   for (const k of ['sceneRT', 'dofRT', 'aoRT']) post[k].dispose();
   post.bloom.dispose();
   makePost();
 });
 
 // ===== ワープ =====
+// 位置 (th, z, h) から、ワールド座標の target を向くように yaw・pitch を決める
+function aimCam(th, z, h, target) {
+  const r = R - h, p = new THREE.Vector3(r * Math.cos(th), r * Math.sin(th), z), d = target.clone().sub(p);
+  const up = new THREE.Vector3(-Math.cos(th), -Math.sin(th), 0), east = new THREE.Vector3(-Math.sin(th), Math.cos(th), 0);
+  const de = d.dot(east), dn = d.z, du = d.dot(up);
+  go(th, z, h, Math.atan2(de, dn), Math.atan2(du, Math.hypot(de, dn)));
+}
 const go = (th, z, h, yaw, pitch) => { leaveSpace(); Object.assign(player, { th, z, h, yaw, pitch }); };
 const roadS = s => Math.round(s / P) * P + 6.5; // 最寄りの南北道路の歩道
 const PRESETS = [
@@ -3200,7 +3454,7 @@ const PRESETS = [
   ['都心の大通り', () => { const c = landmarks.cbd[0][1]; go(STRIP_PHI[0] + roadS(c.s) / R, c.z, EYE, 0, 0.3); }],
   ['大きな公園', () => { const p = landmarks.parks[1][0]; go(STRIP_PHI[1] + p.s / R, p.z, EYE, 0, 0.35); }],
   ['川沿い', () => go(STRIP_PHI[2] + (sCenter(RIVER_I[2]) + P / 2 - 4) / R, 600, EYE, 0, 0.22)],
-  ['橋の上（窓の真上）', () => go(WIN_PHI[0], BRIDGE_Z[6] + 8, EYE, Math.PI / 2 + 0.25, 0.05)],
+  ['橋の上（窓の真上）', () => go(WIN_PHI[0], BRIDGE_Z[5] + 8, EYE, Math.PI / 2 + 0.25, 0.05)],
   ['超高層ビルの屋上', () => { const t = landmarks.tallest[0]; go(STRIP_PHI[0] + t.s / R, t.z + t.d / 2 - 1, t.h + 3, 0, -0.3); }],
   ['上空 1500m', () => go(STRIP_PHI[0], -2000, 1500, 0, -0.05)],
   ['中心軸のそば（無重力帯）', () => go(STRIP_PHI[0], -HL + 1200, R - 80, 0, 0)],
@@ -3210,6 +3464,7 @@ const PRESETS = [
   ['★ 拡張境界地区（農業→工業→旧市街→新市街）', () => go(STRIP_PHI[0] - 200 / R, ZONE.farmEnd - 500, 260, 0, -0.32)],
   ['★ 旧市街と再開発予定地', () => { const r = landmarks.redev[0] || { s: 0, z: (ZONE.indEnd + ZONE.oldEnd) / 2 }; lookAt(0, r.s - 140, r.z - 160, r.s, r.z, 45, 0.85); }],
   ['★ 歓楽街', () => { const n = landmarks.neonSpot || landmarks.cbd[0][0]; go(STRIP_PHI[0] + (Math.round(n.s / P) * P + 6.5) / R, n.z - 150, 30, 0, 0.32); }],
+  ['★ 新造船所', () => aimCam(0.75 + 0.35, NEW_YARD_Z - 230, R - 330, new THREE.Vector3(Math.cos(0.75) * 140, Math.sin(0.75) * 140, NEW_YARD_Z))],
   ['★ 中心軸の駅（見上げる）', () => go(STRIP_PHI[0] + 0.25, HUB_Z - 700, 120, 0, 1.0)],
   ['★ 中心軸の駅（間近）', () => go(STRIP_PHI[0] + 0.62, HUB_Z - 750, R - 520, 0.35, 0.42)],
   ['★ 無重力パーク駅（電車が止まる）', () => go(STRIP_PHI[0] + 0.45, ZG_Z - 330, R - 130, 0.15, 0.25)],
@@ -3303,8 +3558,8 @@ const lookAt = (k, as, az, bs, bz, h, pitchK = 0.85) => go(STRIP_PHI[k] + as / R
 // 新市街（旧市街の境目より奥、+z 側の畑より手前）のオフィス街のターミナルを選ぶ
 const newTownTerm = ts => ts.find(x => x.kind === 'office' && x.z > ZONE.oldEnd + 400 && x.z < HL - 1600) || ts.find(x => x.z > ZONE.oldEnd + 400) || ts[0];
 function terminalShot() {
-  const k = 0, ts = landmarks.terminals[k], t = newTownTerm(ts);
-  lookAt(k, 150, t.z - 200, 0, t.z, 280, 1.0);              // ビルより高い位置から交差点を見下ろす
+  const k = 0, ts = landmarks.terminals[k], t = ts.find(x => x.elev && x.z === HUB_Z) || newTownTerm(ts);   // 中央駅へのエレベーターがあるターミナル
+  aimCam(STRIP_PHI[k] + 160 / R, t.z - 260, 560, new THREE.Vector3(...cyl(R - 40, STRIP_PHI[k], t.z).toArray()));   // 高層ビルの上から、駅とまっすぐ上へ伸びるエレベーターを見る
   const tr = vehicles.trains.find(x => !x.ring && x.dir > 0 && Math.abs(x.lane - STRIP_PHI[k]) < 0.01);
   if (tr && tr.stops) {
     const idS = STATIONS.axial.findIndex(z => Math.abs(z - t.z) < 1), stopU = tr.stops[idS];
@@ -3315,40 +3570,45 @@ function terminalShot() {
 // 1ショット = 開始位置 + 移動量（d）+ 字幕。space ショットは宇宙カメラの値を from→to で動かす
 const SHOTS = [
   { ch: 'プロローグ', t: 'L5宙域、スペースコロニー「ネオ・ミヤギ」', x: '地球と月の重力がつり合うラグランジュ点L5。直径6.4km、長さ16kmの円筒が、太陽に片側の端を向けて浮かんでいるのだ。オニール型「島3号」を手本に、2071年に建設が始まり、2089年に完成したのだ。', dur: 18,
-    space: { mode: 'overview', from: { az: 0.3, tilt: 1.05, dist: 34000, tz: -2000 }, to: { az: 1.2, tilt: 1.15, dist: 26000, tz: -1000 } }, night: 0 },
+    space: { mode: 'overview', from: { az: -0.3, tilt: 1.0, dist: 38000, tz: -2000, roll: -0.25 }, to: { az: 1.3, tilt: 1.2, dist: 25000, tz: -1000, roll: 0.1 } }, night: 0 },
   { ch: 'プロローグ', t: '110秒で1回転する大地', x: 'コロニーは約110秒に1回転しているのだ。内側の地面では、この回転の遠心力がちょうど地球と同じ1Gの重さを生むのだ。中に住む約300万人にとって、円筒の内側が「地面」なのだ。', dur: 15,
-    space: { mode: 'overview', from: { az: 1.2, tilt: 1.15, dist: 26000, tz: -1000 }, to: { az: 2.0, tilt: 1.4, dist: 22000, tz: 0 } } },
+    space: { mode: 'overview', from: { az: 1.3, tilt: 1.57, dist: 20000, tz: 0, roll: 0 }, to: { az: 2.6, tilt: 1.57, dist: 17000, tz: 0, roll: 0.9 } } },
   { ch: 'プロローグ', t: '6基の兄弟コロニー', x: 'L5宙域には同じ型のコロニーが6基並んでいるのだ。どれも軸を太陽に向けて回り続け、外側の3枚の巨大なミラーで太陽の光を窓から中へ送り込んでいるのだ。', dur: 15,
-    space: { mode: 'overview', from: { az: 0.15, tilt: 0.55, dist: 200000, tz: 0 }, to: { az: 0.35, tilt: 0.6, dist: 185000, tz: 0 }, target: [-80000, 0, 0] } },
+    space: { mode: 'overview', from: { az: -0.2, tilt: 0.5, dist: 210000, tz: 0, roll: -0.3 }, to: { az: 0.6, tilt: 0.75, dist: 175000, tz: 0, roll: 0.2 }, target: [-80000, 0, 0] } },
   { ch: 'プロローグ', t: '太陽と3枚のミラー', x: '太陽は円筒の片側の端の先にあるのだ。陸地3枚と窓3枚が交互に並び、窓の外のミラーが角度を変えて光を入れたり閉じたりすることで、中に昼と夜を作っているのだ。', dur: 15,
-    space: { mode: 'overview', from: { az: 0.4, tilt: 2.6, dist: 34000, tz: -4000 }, to: { az: 0.9, tilt: 2.5, dist: 30000, tz: -3000 } } },
+    space: { mode: 'overview', from: { az: -0.2, tilt: 2.75, dist: 36000, tz: -4000, roll: 0.3 }, to: { az: 1.2, tilt: 2.35, dist: 28000, tz: -3000, roll: -0.2 } } },
   { ch: '入港', t: '宇宙港へのアプローチ', x: '太陽と反対側の端に、宇宙船の入口があるのだ。宇宙へまっすぐ伸びる赤い誘導灯の列に沿って、ぼくたちの船もゆっくり近づいていくのだ。入口が近づくと、船は噴射を絞っていくのだ。', dur: 22, fadeOut: true, fadeColor: '#ffffff',
     space: { mode: 'entrance', from: { az: 0.5, tilt: 2.75, dist: 2600, tz: ENTRY_Z - 9000 }, to: { az: 0.2, tilt: 3.05, dist: 500, tz: ENTRY_Z + 150 } } },
   { ch: '入港', t: '無重力の中心軸へ', x: '入口を抜けると、そこは円筒の中心軸なのだ。軸の近くは回転の影響がほとんどなく、無重力なのだ。貨物船や旅客船、そして時速1000kmの高速電車が、両端の宇宙港のあいだを行き来しているのだ。', dur: 18, fadeIn: true, fadeColor: '#ffffff',
     from: preset('宇宙港の出口'), d: { z: 1600, yaw: -0.1, pitch: -0.05 } },
   { ch: '円筒の内側', t: '頭上にも街がある世界', x: '見上げると、反対側の陸地が空のかわりに広がっているのだ。遠くの街ほど空気に霞んで、地面が両側からせり上がっていく――ここが円筒の中だと実感できる眺めなのだ。', dur: 16,
-    from: () => go(STRIP_PHI[0], -HL + 1800, R - 700, 0, -0.25), d: { z: 1200, pitch: 0.15 } },
-  { ch: '観光地', t: 'コロニー中央駅', x: '中心軸のちょうど真ん中に、構造物が蜂の巣のように寄り集まった中央駅があるのだ。地面からは自転車のスポークのように6本のエレベーターが伸び、ネオン看板と赤い警告灯がまたたく、コロニー随一の独特な景観なのだ。', dur: 16,
-    from: preset('中心軸の駅（間近）'), d: { yaw: 0.25, z: 120 } },
+    from: () => go(STRIP_PHI[0], -HL + 1800, R - 700, 0, -0.25), d: { z: 1500, pitch: 0.15 }, roll: 1.2 },   // 前進しながらゆっくり回る
+  { ch: '観光地', t: '新造船所', x: 'このコロニーは、もともと月から運んだ鉱物で船を造る、無重力の造船所として始まったのだ。今も軸のそばの新造船所では、重さのない空間で大きな船を効率よく組み立てているのだ。まわりには駅や事務所、積み上がった資材やタンクがひしめき、できあがった船は軸ぞいを通って宇宙港から宇宙へ出ていくのだ。', dur: 15,
+    from: () => aimCam(0.75 + 0.35, NEW_YARD_Z - 230, R - 330, new THREE.Vector3(Math.cos(0.75) * 140, Math.sin(0.75) * 140, NEW_YARD_Z)), d: { z: 120 } },  // かごの外から組み立て中の船をねらう
+  { ch: '観光地', t: 'コロニー中央駅（旧造船所）', x: '中央駅は、昔は最初の造船所だったのだ。錆びた巨大クレーンや船台のリング、最初に造られた船の骨組みが今も残っているのだ。そのまわりに駅と店が増築を重ねて、蜂の巣のような姿になったのだ。', dur: 16,
+    from: () => {}, orbit: { k: 0, s: 0, z: HUB_Z, h: R - 40, r: 760, ch: R - 560, ch1: R - 470, a0: -1.0, a1: 0.6 } },   // 中央駅のまわりを回り込む
   { ch: '観光地', t: '無重力パーク', x: '中心軸を包む直径500mのガラスの球なのだ。木の生えた浮島や水の玉のあいだを、人々が泳ぐように漂って遊んでいるのだ。軸の高速電車もここで止まるのだ。', dur: 15,
     from: preset('★ 無重力パーク（中心軸）'), d: { z: 200, pitch: -0.1 } },
   { ch: '街区', t: '都心のオフィス街', x: '高層ビルが立ち並ぶ都心なのだ。線路が交わるターミナル駅のまわりや、昔から栄えた場所にビルが集まっているのだ。窓の奥では今日も誰かが働いているのだ。', dur: 14,
-    from: preset('都心の大通り'), d: { z: 140, h: 20 } },
-  { ch: '街区', t: 'ターミナル駅', x: '横に走る環状線と、陸地の中央を縦に走る高架線が交わる場所には、必ずターミナル駅があるのだ。オフィス街に育った駅もあれば、昔ながらの住宅地のままの駅もあるのだ。', dur: 13,
-    from: terminalShot, d: { z: 160, h: -10 } },
+    from: preset('都心の大通り'), d: { z: 220, h: 160, pitch: 0.35 } },   // ビルの谷間から上昇
+  { ch: '街区', t: 'ターミナル駅', x: '環状線と陸地中央の高架線が交わるターミナル駅の真上からは、軸の中央駅へまっすぐ上がるエレベーターが伸びているのだ。地面の鉄道と、軸の高速電車や宇宙船がここでつながるコロニーのハブなので、エレベーターに近いほど高いビルが集まっているのだ。', dur: 13,
+    from: terminalShot, d: { z: 120, h: -60, yaw: 0.35 }, roll: 0.15 },
   { ch: '街区', t: '歓楽街', x: '昼間は少し静かな歓楽街なのだ。ビルの壁には看板がびっしり、大型スクリーンには広告が流れているのだ。本番は夜――あとで戻ってくるのだ。', dur: 13,
     from: preset('★ 歓楽街'), d: { z: 120, h: -10 } },
   { ch: '街区', t: '商店街', x: '発展しなかった駅の前には、アーケードのかかった昔ながらの商店街が残っているのだ。色とりどりの小さな店が並び、いつも人でにぎわっているのだ。', dur: 12, from: () => { const p = landmarks.shopSta || landmarks.samples.shop; go(STRIP_PHI[p.k] + p.s / R, p.z - 54, 3.2, 0, 0.03); }, d: { z: 75 } },   // アーケードの屋根の下を歩く
   { ch: '街区', t: '拡張境界地区', x: 'コロニーの街は、宇宙港のある端から奥へ少しずつ広がってきたのだ。端の畑から、工業地帯、開拓期にできた旧市街、そして新市街へ――時代ごとの街並みが、帯のように順番に並んでいるのだ。', dur: 16,
-    from: () => go(STRIP_PHI[0] - 200 / R, ZONE.farmEnd - 500, 260, 0, -0.32), d: { z: 1500, pitch: 0.12 } },
+    from: () => go(STRIP_PHI[0] - 200 / R, ZONE.farmEnd - 500, 260, 0, -0.32), d: { z: 2000, pitch: 0.18, h: -60 }, roll: -0.25 },
   { ch: '街区', t: '旧市街', x: '開拓者たちが最初に住んだ旧市街は、今では古いアパートがすき間なくひしめく貧民街になっているのだ。路地の先には、新市街のきれいな高層ビルがそびえているのだ。市は再開発を進めようとしているけど、「再開発反対」の横断幕を掲げる住民の反対にあって、話し合いは今も続いているのだ。', dur: 15,
     from: () => { const i = 16, sx = 4 * P + 6.5; go(STRIP_PHI[0] + sx / R, oldEndAt(0, i) - 520, 7, 0, 0.2); }, d: { z: 220, pitch: 0.06 } },   // 旧市街の路地から、境目の向こうの新市街の高層ビルを見上げる
   { ch: '街区', t: '寺社と鎮守の森', x: 'コロニーの人々は、地球から神様もいっしょに連れてきたのだ。朱色の鳥居と鎮守の森が、住宅地の中に静かにたたずんでいるのだ。', dur: 11, from: () => { const t = landmarks.samples.temple, n = t.ns || { s: t.s + 110, z: t.z }, dx = n.s - t.s, dz = n.z - t.z, L = Math.hypot(dx, dz) || 1; lookAt(t.k, t.s - dx / L * 120, t.z - dz / L * 120, t.s + dx * 0.5, t.z + dz * 0.5, 38, 0.7); }, d: { h: -6 } },  // 寺社の向こうに歓楽街
-  { ch: '街区', t: '工場と倉庫街', x: '宇宙港のある端の畑のすぐ奥には、コロニーの暮らしを支える工場や倉庫が集まっているのだ。宇宙港から運び込まれた資材を加工する、トラックが行き交う「街の裏側」なのだ。', dur: 11, from: atSample('factory', 55, 60), d: { z: 60, yaw: 0.15 } },
-  { ch: '街区', t: '農業区画', x: '両端の蓋の近くには、畑とガラスの温室が広がっているのだ。最初の作物の枝豆もここで育ったのだ。300万人の食べ物の多くは、このコロニーの中で育てているのだ。', dur: 12, from: () => { const sp = landmarks.samples.farm; lookAt(sp.k, sp.s, sp.z - 80, sp.s, sp.z - 500, 55, 0.75); }, d: { z: -90, yaw: 0.12 } },   // 畑の中から蓋の方（一面の畑）を向く
+  { ch: '街区', t: '工場と倉庫街', x: '造船の町として始まったネオ・ミヤギも、今は商業と観光の街なのだ。工場は宇宙港側の端に残るだけで、のこぎり屋根の工場や倉庫が並ぶ「街の裏側」になっているのだ。', dur: 11, from: atSample('factory', 55, 60), d: { z: 60, yaw: 0.15 } },
+  { ch: '街区', t: '農業区画', x: '両端の蓋の近くには、畑とガラスの温室が広がっているのだ。最初の作物の枝豆もここで育ったのだ。300万人の食べ物の多くは、このコロニーの中で育てているのだ。', dur: 14, from: () => {}, d: {},
+    follow: () => {                                  // 畑の上を周方向に低空飛行（前方の畑が円筒に沿ってせり上がる）
+      const u = Math.min(demo.t / SHOTLIST()[demo.i].dur, 1), th = STRIP_PHI[0] - 0.42 + 0.84 * u;
+      Object.assign(player, { th, z: -HL + 750 + 120 * Math.sin(u * Math.PI), h: 55 + 25 * Math.sin(u * Math.PI * 2), yaw: Math.PI / 2 + 0.25 * Math.sin(u * Math.PI), pitch: 0.06 }); }, roll: 0.12 },   // 軸のそばから横を向く（画角が窓1枚より広いので常に畑が入る）
   { ch: '観光地', t: '大きな公園', x: '街のところどころにある大きな公園なのだ。鳥が群れで旋回し、木々が風に揺れているのだ。空の代わりに見えるのは、反対側の街なのだ。', dur: 12, from: preset('大きな公園'), d: { z: 100, pitch: 0.1 } },
   { ch: '観光地', t: '窓の上を渡る橋', x: '陸地と陸地のあいだにある窓は、全面ガラスなのだ。その上を渡る橋からは、足元のガラス越しに宇宙が見えるのだ。', dur: 13, from: preset('橋の上'), d: { th: 0.04, pitch: -0.3 } },
-  { ch: '観光地', t: 'リング大観覧車と遊園地', x: '窓のすぐそばに立つ直径240mの大観覧車なのだ。駅を降りるとすぐ遊園地で、ジェットコースターやメリーゴーラウンドがにぎやかに動いているのだ。', dur: 14, from: preset('リング大観覧車'), d: { z: 120, yaw: 0.15 } },
+  { ch: '観光地', t: 'リング大観覧車と遊園地', x: '窓のすぐそばに立つ直径240mの大観覧車なのだ。駅を降りるとすぐ遊園地で、ジェットコースターやメリーゴーラウンドがにぎやかに動いているのだ。', dur: 14, from: () => {}, orbit: { k: 1, s: 1470, z: BRIDGE_Z[RESORT.bi] + 300, h: 150, r: 380, ch: 40, ch1: 90, a0: -0.9, a1: 0.3 } },   // 観覧車のまわりを回り込む
   { ch: '観光地', t: '蓋をのぼるエレベーター', x: '両端の蓋には、地面から中心の宇宙港へまっすぐ上がるエレベーターが並んでいるのだ。いっしょに上ってみると、街がどんどん遠ざかり、上に行くほど体が軽くなって、終点ではふわりと浮いてしまうのだ。', dur: 11,
     from: () => { const i = elevators.findIndex(e => Math.abs(e.th - STRIP_PHI[0]) < 1e-3 && e.z < 0); demo.elev = i; elevLaunch(i, elapsed, 22); go(STRIP_PHI[0] + 130 / R, elevators[i].z + 260, 30, Math.PI - 0.5, 0); },
     follow: () => {                                  // 上っていく電車の斜め後ろについていき、電車を画面の中心にとらえる
@@ -3356,19 +3616,54 @@ const SHOTS = [
       player.h = Math.max(20, h + 30); player.th = e.th + ds / (R - player.h); player.z = e.z + dz;
       player.yaw = Math.atan2(-ds - 8.5, -dz); player.pitch = Math.atan2(h + 28 - player.h, Math.hypot(ds, dz)); } },
   { ch: '夜', t: 'ミラーが閉じて、夜が来る', x: '夕方になると、外の3枚のミラーがゆっくり窓に閉じていくのだ。差し込む光が消えて、コロニーに夜が訪れるのだ。', dur: 16, night: 1,
-    from: preset('上空 1500m'), d: { z: 900, pitch: 0.2 } },
+    from: preset('上空 1500m'), d: { z: 1100, pitch: 0.25, yaw: 0.5 }, roll: 0.35 },
   { ch: '夜', t: '光の筒', x: '夜のコロニーを中心軸から眺めると、窓明かりと街灯と車の光の流れが、円筒の内側をぐるりと埋め尽くすのだ。ここでしか見られない、上下左右すべてが夜景の世界なのだ。', dur: 18,
-    from: () => go(STRIP_PHI[0], -HL + 2500, R - 120, 0, 0), d: { z: 2200, yaw: 0.3 } },
+    from: () => go(STRIP_PHI[0], -HL + 2500, R - 120, 0, 0), d: { z: 3000, yaw: 0.2 }, roll: 1.6 },   // 光の筒の中を回りながら進む
   { ch: '夜', t: '目を覚ます歓楽街', x: '昼間は静かだった歓楽街が、夜になると一気に目を覚ますのだ。ネオン看板と広告スクリーンが道路まで色とりどりに染めるのだ。', dur: 15, from: preset('★ 歓楽街'), d: { z: 160, h: -12 } },
   { ch: '夜', t: '提灯の灯る川辺の屋台通り', x: '陸地を流れる川の岸には遊歩道があり、夜になると屋台がずらりと並ぶのだ。提灯の下で、水面に揺れる光を眺めながら食べ歩きを楽しめるのだ。', dur: 15,
     from: () => go(STRIP_PHI[RIVERSIDE.k] + (sCenter(RIVER_I[RIVERSIDE.k]) + 51) / R, zCenter(RIVERSIDE.j0) - 40, 12, -0.12, 0.05), d: { z: 200 } },   // 歩く速さでゆっくり（通りを流しきらない）
-  { ch: '夜', t: '夜の中央駅', x: '夜の中央駅は、ネオンの塊から光るエレベーターが放射状に伸びる、まるで巨大な灯台なのだ。', dur: 14, from: () => go(STRIP_PHI[0] + 0.25, HUB_Z - 420, R - 650, 0, 1.15), d: { yaw: 0.35, h: 60 } },  // 巣のすぐ下から見上げる
+  { ch: '夜', t: '夜の中央駅', x: '夜の中央駅は、ネオンの塊から光るエレベーターが放射状に伸びる、まるで巨大な灯台なのだ。', dur: 14, from: () => go(STRIP_PHI[0] + 0.25, HUB_Z - 420, R - 650, 0, 1.15), d: { yaw: 0.6, h: 140 }, roll: -0.5 },  // 巣のすぐ下から見上げる
   { ch: '夜', t: '虹色の観覧車', x: '観覧車の外周とジェットコースターのレールに虹色の光が流れ、遊園地の夜はまだまだ終わらないのだ。', dur: 13, from: () => { const zw = BRIDGE_Z[RESORT.bi] + 300; lookAt(1, 1470 - 60, zw - 320, 1470, zw, 60, -0.35); }, d: { z: 70, h: 10 } },  // 観覧車の正面から見上げる
   { ch: '夜', t: 'ライトアップされた公園', x: '公園では、暖かな光が木々を足元から照らしているのだ。頭上には反対側の街の灯りが、星空のかわりに広がっているのだ。', dur: 13, from: preset('大きな公園'), d: { z: 100, pitch: 0.15 } },
   { ch: 'エピローグ', t: 'また朝が来る', x: 'やがてミラーが開き、コロニーにまた朝が来るのだ。宇宙に浮かぶ小さな故郷、ネオ・ミヤギへようこそ。――ガイドはずんだもんでした。', dur: 20, night: 0, fadeIn: true, fadeOut: true,
-    space: { mode: 'overview', from: { az: 1.6, tilt: 1.2, dist: 22000, tz: -1000 }, to: { az: 0.5, tilt: 1.05, dist: 34000, tz: -2000 } } },
+    space: { mode: 'overview', from: { az: 1.8, tilt: 1.3, dist: 20000, tz: -1000, roll: 0.2 }, to: { az: 0.3, tilt: 0.95, dist: 40000, tz: -2000, roll: -0.15 } } },
+];
+const SNS_SHOTS = [
+  { ch: 'L5 SPACE COLONY', t: 'ネオ・ミヤギ', x: '宇宙に浮かぶ\n長さ16kmの円筒の街', dur: 5, night: 0,
+    space: { mode: 'overview', from: { az: 0.3, tilt: 1.05, dist: 34000, tz: -2000 }, to: { az: 0.75, tilt: 1.1, dist: 27000, tz: -1500 } } },
+  { ch: 'L5 SPACE COLONY', t: '110秒で1回転', x: '回転の遠心力で\n地面に1Gの重さが生まれるのだ', dur: 4,
+    space: { mode: 'overview', from: { az: 0.4, tilt: 2.3, dist: 13000, tz: -HL, roll: 1.2 }, to: { az: 0.9, tilt: 2.4, dist: 11000, tz: -7000, roll: 1.35 } } },   // 蓋の側から斜めに。円筒を横倒しに見せ、蓋が回るのを見せる
+  { ch: '入港', t: '宇宙港へ', x: '赤い誘導灯に沿って\n中へ入るのだ', dur: 6, fadeOut: true, fadeColor: '#ffffff',
+    space: { mode: 'entrance', from: { az: 0.5, tilt: 2.75, dist: 2200, tz: ENTRY_Z - 6000 }, to: { az: 0.2, tilt: 3.05, dist: 500, tz: ENTRY_Z + 150 } } },
+  { ch: '入港', t: '無重力の中心軸へ', x: '軸のまわりは無重力\n船と電車が行き来するのだ', dur: 5, fadeIn: true, fadeColor: '#ffffff',
+    from: preset('宇宙港の出口'), d: { z: 900, yaw: -0.1, pitch: -0.05 }, roll: 0.5 },
+  { ch: '観光名所', t: 'コロニー中央駅', x: 'もとは最初の造船所\n増築を重ねた蜂の巣の駅なのだ', dur: 5,
+    from: () => go(STRIP_PHI[0] + 0.62, HUB_Z - 750, R - 520, 0.35, 0.42), d: { yaw: 0.25, z: 120 } },
+  { ch: '観光名所', t: '新造船所', x: '重さのない軸のそばで\n大きな船を組み立てるのだ', dur: 4,
+    from: () => aimCam(0.75 + 0.35, NEW_YARD_Z - 230, R - 330, new THREE.Vector3(Math.cos(0.75) * 140, Math.sin(0.75) * 140, NEW_YARD_Z)), d: { z: 100 } },
+  { ch: '街区', t: 'ターミナル駅', x: '中央駅からのエレベーターが\n地上の鉄道とつながるのだ', dur: 4,
+    from: terminalShot, d: { z: 100, h: -50, yaw: 0.3 }, roll: 0.15 },
+  { ch: '街区', t: '農業区画', x: '蓋のそばの畑で\n300万人の食べ物を育てるのだ', dur: 5, from: () => {}, d: {},
+    follow: () => {                                  // 畑の上を周方向に低空飛行（PC版の農業区画の短縮版）
+      const u = Math.min(demo.t / SHOTLIST()[demo.i].dur, 1), th = STRIP_PHI[0] - 0.2 + 0.4 * u;
+      Object.assign(player, { th, z: -HL + 750 + 60 * Math.sin(u * Math.PI), h: 55 + 15 * Math.sin(u * Math.PI * 2), yaw: Math.PI / 2 + 0.2 * Math.sin(u * Math.PI), pitch: 0.06 }); }, roll: 0.12 },
+  { ch: '昼のコロニー', t: '300万人の街', x: '円筒の内側を\nぐるりと街が囲むのだ', dur: 5,
+    from: () => go(STRIP_PHI[0] + 0.12, 600, 700, 0, -0.32), d: { z: 600, pitch: 0.1 } },
+  { ch: '夜が来る', t: 'ミラーが閉じる', x: '外のミラーが窓を覆うと\nコロニーに夜が来るのだ', dur: 8, night: 1,
+    from: () => go(STRIP_PHI[0] + 0.2, -1200, 1500, -0.35, -0.04), d: { z: 600, pitch: 0.08 }, roll: 0.45 },   // エレベーターが画面の真ん中に来ないよう、横にずらして斜めに見る
+  { ch: '夜のコロニー', t: '光の筒', x: '上も下も左右も\nすべてが夜景なのだ', dur: 6,
+    from: () => go(STRIP_PHI[0], NEW_YARD_Z + 450, R - 120, 0, 0), d: { z: 700, yaw: 0.15 }, roll: 0.7 },   // 新造船所の先から、ゆっくり進んで夜景を見せる
+  { ch: '観光名所', t: '夜の中央駅', x: 'ネオンと光るエレベーターの\n巨大な灯台なのだ', dur: 5,
+    from: () => go(STRIP_PHI[0] + 0.25, HUB_Z - 420, R - 650, 0, 1.15), d: { yaw: 0.3, h: 50 } },
+  { ch: '街区', t: '歓楽街', x: '夜になると看板が\n一斉に光るネオン街なのだ', dur: 5,
+    from: () => { const n = landmarks.neonSpot || landmarks.cbd[0][0]; go(STRIP_PHI[0] + (Math.round(n.s / P) * P + 6.5) / R, n.z - 150, 30, 0, 0.32); }, d: { z: 90 } },
+  { ch: '観光名所', t: '虹色の観覧車', x: '直径240mの観覧車と\nコースターが光るのだ', dur: 5,
+    from: () => { const zw = BRIDGE_Z[RESORT.bi] + 300; lookAt(1, 1470 - 60, zw - 320, 1470, zw, 60, -0.35); }, d: { z: 60, h: 8 } },
+  { ch: 'L5 SPACE COLONY', t: 'ネオ・ミヤギ', x: '宇宙に浮かぶ小さな故郷へ\nようこそなのだ', dur: 5, night: 0,
+    space: { mode: 'overview', from: { az: 1.4, tilt: 1.15, dist: 22000, tz: -1000 }, to: { az: 0.6, tilt: 1.05, dist: 32000, tz: -2000 } } },
 ];
 const demo = { on: false, paused: false, i: 0, t: 0, start: null };
+const SHOTLIST = () => SNS ? SNS_SHOTS : SHOTS;
 
 // ===== BGM（WebAudio で合成）: 落ち着いたテンポのエレピ風ピアノ＋ベース＋シンセパッド、宇宙っぽい残響 =====
 const music = { on: false, timer: null, next: 0, step: 0 };
@@ -3408,9 +3703,9 @@ function pad(t, notes, len) {                         // パッド: 少しずら
   for (const n of notes) for (const det of [-9, 9]) { const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = midi(n); o.detune.value = det; o.connect(f); o.start(t); o.stop(t + len + 0.6); }
   f.connect(g); g.connect(music.bus);
 }
-function scheduleMusic() {
+function scheduleMusic(until) {
   const ctx = audio.ctx, beat = 60 / 70;
-  while (music.next < ctx.currentTime + 0.4) {
+  while (music.next < (until ?? ctx.currentTime + 0.4)) {
     const t = music.next, st = music.step, bar = Math.floor(st / 8), [root, ch] = PROG[Math.floor(bar / 2) % PROG.length], e = st % 8;
     if (st % 16 === 0) pad(t, [ch[0], ch[2], ch[4]], beat * 8);
     if (e === 0) bass(t, root, beat * 1.8);
@@ -3422,7 +3717,28 @@ function scheduleMusic() {
     music.next += beat / 2; music.step++;
   }
 }
+// 動画用: BGM を sec 秒ぶん OfflineAudioContext で合成し、WAV を base64 で返す（最初と最後はフェード）
+async function renderMusicWav(sec) {
+  const wasOn = music.on; if (wasOn) setMusic(false);   // 合成中にリアルタイムのタイマーがグローバル状態を触らないように
+  const sr = 44100, off = new OfflineAudioContext(2, Math.ceil(sr * sec), sr), keep = { ctx: audio.ctx, out: music.out, bus: music.bus, next: music.next, step: music.step };
+  audio.ctx = off; music.out = null; musicNodes(); music.next = 0.05; music.step = 0;
+  music.out.gain.setValueAtTime(0, 0); music.out.gain.linearRampToValueAtTime(0.8, 1.5); music.out.gain.setValueAtTime(0.8, sec - 2.5); music.out.gain.linearRampToValueAtTime(0, sec - 0.2);
+  scheduleMusic(sec);
+  const buf = await off.startRendering();
+  Object.assign(music, { out: keep.out, bus: keep.bus, next: keep.next, step: keep.step }); audio.ctx = keep.ctx;
+  if (wasOn) setMusic(true);
+  const n = buf.length, data = new DataView(new ArrayBuffer(44 + n * 4)), ch = [buf.getChannelData(0), buf.getChannelData(1)];
+  const str = (o, t) => [...t].forEach((c, i) => data.setUint8(o + i, c.charCodeAt(0)));
+  str(0, 'RIFF'); data.setUint32(4, 36 + n * 4, true); str(8, 'WAVEfmt '); data.setUint32(16, 16, true); data.setUint16(20, 1, true); data.setUint16(22, 2, true);
+  data.setUint32(24, sr, true); data.setUint32(28, sr * 4, true); data.setUint16(32, 4, true); data.setUint16(34, 16, true); str(36, 'data'); data.setUint32(40, n * 4, true);
+  for (let i = 0; i < n; i++) for (let c = 0; c < 2; c++) data.setInt16(44 + (i * 2 + c) * 2, Math.max(-1, Math.min(1, ch[c][i])) * 32767, true);
+  let bin = ''; const u8 = new Uint8Array(data.buffer); for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode(...u8.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+window.__renderMusicWav = renderMusicWav;
+window.__snsDuration = () => SNS_SHOTS.reduce((a, s) => a + s.dur, 0);
 function setMusic(on) {
+  if (on === music.on && (!on || music.timer)) return;   // 何度呼んでも二重に鳴らさない
   if (!audio.ctx) startAudio();
   if (!audio.ctx) return;
   musicNodes();
@@ -3435,18 +3751,28 @@ function setMusic(on) {
 const demoEl = { cap: el('demo-cap'), fade: el('demo-fade'), bar: el('demo-bar') };
 const ease = u => u * u * (3 - 2 * u);
 function demoStartShot(i) {
-  const sh = SHOTS[i];
+  const sh = SHOTLIST()[i];
+  if (SNS) {                                         // 上下の帯の文字を切り替える
+    const tp = el('sns-top'), bt = el('sns-bot');
+    [tp, bt].forEach(e => [...e.children].forEach(c => c.style.opacity = 0));
+    const put = () => { tp.querySelector('.ch').textContent = sh.ch; tp.querySelector('.t').textContent = sh.t; bt.querySelector('.x').innerHTML = sh.x.replace(/\n/g, '<br>'); [tp, bt].forEach(e => [...e.children].forEach(c => c.style.opacity = 1)); };
+    const tk = demo.snsTok = (demo.snsTok || 0) + 1;   // 連打したとき、前の場面の文字が遅れて出ないように
+    if (REC) put(); else setTimeout(() => { if (tk === demo.snsTok) put(); }, 300);
+  }
   demo.i = i; demo.t = 0;
-  if (sh.night !== undefined && dayNight.target !== sh.night) { dayNight.target = sh.night; dayNight.applied = false; }
+  { const list = SHOTLIST(); let nt = 0; for (let k = 0; k <= i; k++) if (list[k].night !== undefined) nt = list[k].night;   // 場面までの昼夜の指定をたどる（飛ばしても合う）
+    if (dayNight.target !== nt) { dayNight.target = nt; dayNight.applied = false; } }
   if (sh.space) {
     space.on = true; space.mode = sh.space.mode; space.target = sh.space.target || null; Object.assign(space, sh.space.from); setSpaceDOF(true); envTimer = 99;
   } else {
-    space.target = null; sh.from(); demo.start = { ...player };
+    space.target = null; leaveSpace(); sh.from(); demo.start = { ...player };   // 宇宙から中へ戻す（from が go を呼ばない場面のため）
   }
   const c = demoEl.cap; c.style.opacity = 0;
   const token = demo.token = (demo.token || 0) + 1;     // 送り・戻しを連打したとき、古い字幕が遅れて出ないように
-  setTimeout(() => { if (token !== demo.token) return; c.querySelector('.ch').textContent = sh.ch; c.querySelector('h2').textContent = sh.t; c.querySelector('p').textContent = sh.x; c.style.opacity = 1; }, 600);
-  el('demo-pos').textContent = `ガイドツアー ${i + 1} / ${SHOTS.length}`;
+  const cp = c.querySelector('p'); cp.style.opacity = 0;
+  setTimeout(() => { if (token !== demo.token) return; c.querySelector('.ch').textContent = sh.ch; c.querySelector('h2').textContent = sh.t; cp.textContent = sh.x; c.style.opacity = 1; }, 600);
+  setTimeout(() => { if (token === demo.token) cp.style.opacity = 1; }, 1800);   // 解説はタイトルを読んで景色を見たあとに出す
+  el('demo-pos').textContent = `ガイドツアー ${i + 1} / ${SHOTLIST().length}`;
   const white = sh.fadeColor === '#ffffff';
   demoEl.fade.style.transition = 'none'; demoEl.fade.style.background = sh.fadeIn ? (sh.fadeColor || '#000') : '#000';
   demoEl.fade.style.opacity = sh.fadeIn || i === 0 ? 1 : 0;
@@ -3456,11 +3782,17 @@ function demoStartShot(i) {
 function updateDemo(dt) {
   if (!demo.on || demo.paused) return;
   demo.t += dt;
-  const sh = SHOTS[demo.i], u = ease(Math.min(demo.t / sh.dur, 1));
+  const sh = SHOTLIST()[demo.i], u = ease(Math.min(demo.t / sh.dur, 1));
   if (sh.space) {
     for (const k of ['az', 'tilt', 'dist', 'tz']) space[k] = THREE.MathUtils.lerp(sh.space.from[k], sh.space.to[k], u);
+    camRoll = THREE.MathUtils.lerp(sh.space.from.roll || 0, sh.space.to.roll || 0, u);
   } else {
-    if (sh.follow) sh.follow();                    // 電車についていく場面（ここで return すると次の場面へ進めなくなる）
+    camRoll = (sh.roll || 0) * u;                   // 場面ごとのロール（ラジアン）
+    if (sh.orbit) {                                 // 目標のまわりを回り込む: { k, s, z, h(目標の高さ), r(半径), ch(カメラの高さ), a0, a1 }
+      const o = sh.orbit, a = o.a0 + (o.a1 - o.a0) * u, h = THREE.MathUtils.lerp(o.ch, o.ch1 ?? o.ch, u);
+      const cs = o.s + Math.sin(a) * o.r, cz = o.z - Math.cos(a) * o.r;
+      aimCam(STRIP_PHI[o.k] + cs / R, cz, h, new THREE.Vector3(...cyl(R - o.h, STRIP_PHI[o.k] + o.s / R, o.z).toArray()));
+    } else if (sh.follow) sh.follow();              // 電車についていく場面（ここで return すると次の場面へ進めなくなる）
     else {
       const d = sh.d || {}, s0 = demo.start;
       player.th = s0.th + (d.th || 0) * u; player.z = s0.z + (d.z || 0) * u; player.h = s0.h + (d.h || 0) * u;
@@ -3470,17 +3802,27 @@ function updateDemo(dt) {
   const fadeLen = sh.fadeColor === '#ffffff' ? 2.4 : 1.0;
   if (sh.fadeOut && demo.t > sh.dur - fadeLen && demoEl.fade.style.opacity !== '1') { demoEl.fade.style.background = sh.fadeColor || '#000'; demoEl.fade.style.transition = `opacity ${fadeLen - 0.2}s`; demoEl.fade.style.opacity = 1; }
   if (demo.t > sh.dur - 0.6) demoEl.cap.style.opacity = 0;
-  if (demo.t >= sh.dur) demoStartShot((demo.i + 1) % SHOTS.length);
+  if (demo.t >= sh.dur) demoStartShot((demo.i + 1) % SHOTLIST().length);
+  if (REC) {                                          // フェードをコマ単位で計算（CSS の時間に頼らない）
+    const c = SHOTLIST()[demo.i], fl = c.fadeColor === '#ffffff' ? 2.4 : 1.0;
+    let o = 0, col = c.fadeColor || '#000';
+    if (c.fadeOut && demo.t > c.dur - fl) o = (demo.t - (c.dur - fl)) / fl;
+    if (c.fadeIn && demo.t < 1.5) o = Math.max(o, 1 - demo.t / 1.5);
+    if (demo.i === 0 && demo.t < 1) { o = Math.max(o, 1 - demo.t); col = '#000'; }
+    const list = SHOTLIST(); if (demo.i === list.length - 1 && demo.t > c.dur - 1) { o = Math.max(o, (demo.t - (c.dur - 1))); col = '#000'; }
+    demoEl.fade.style.background = col; demoEl.fade.style.opacity = Math.min(1, o);
+  }
 }
 function startDemo() {
   demo.on = true; keys.clear(); setDemoPause(false);
-  setMusic(true);
+  if (!REC) setMusic(true);
   document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden'));
   demoEl.bar.classList.remove('hidden');
   demoStartShot(0);
 }
 function stopDemo() {
   if (!demo.on) return;
+  camRoll = 0;
   demo.on = false;
   setMusic(false);
   demoEl.cap.style.opacity = 0; demoEl.fade.style.opacity = 0; demoEl.bar.classList.add('hidden');
@@ -3489,9 +3831,7 @@ function stopDemo() {
 function setDemoPause(p) { demo.paused = p; el('demo-pause').textContent = p ? '▶' : '⏸'; el('demo-pause').title = p ? '再生（Space）' : '一時停止（Space）'; }
 function demoStep(d) {
   // 夜/昼の切り替えは途中の場面にしか書いていないので、移動先までの指定をたどって合わせる
-  const i = (demo.i + d + SHOTS.length) % SHOTS.length;
-  let night = 0; for (let k = 0; k <= i; k++) if (SHOTS[k].night !== undefined) night = SHOTS[k].night;
-  if (dayNight.target !== night) { dayNight.target = night; dayNight.applied = false; }
+  const list = SHOTLIST(), i = (demo.i + d + list.length) % list.length;   // 昼夜は demoStartShot が合わせる
   demoStartShot(i);
 }
 el('demo-prev').onclick = e => { e.currentTarget.blur(); demoStep(-1); };
@@ -3499,19 +3839,21 @@ el('demo-next').onclick = e => { e.currentTarget.blur(); demoStep(1); };
 el('demo-pause').onclick = e => { e.currentTarget.blur(); setDemoPause(!demo.paused); };
 el('demo-stop').onclick = () => stopDemo();
 addEventListener('keydown', e => {
+  if (demo.on && SNS) { startAudio(); setMusic(true); if (['Space', 'KeyG', 'Escape'].includes(e.code)) { setDemoPause(false); e.preventDefault(); e.stopImmediatePropagation(); return; } }   // SNS 版はキーで止めない（どのキーでも音が出るだけ）
   if (demo.on) {
     const act = { Escape: stopDemo, KeyG: stopDemo, Space: () => setDemoPause(!demo.paused), ArrowLeft: () => demoStep(-1), ArrowRight: () => demoStep(1) }[e.code];
     if (act) { act(); e.preventDefault(); e.stopImmediatePropagation(); }
   } else if (e.code === 'KeyG') startDemo();
 }, true);
-renderer.domElement.addEventListener('pointerdown', () => stopDemo());
+renderer.domElement.addEventListener('pointerdown', () => { if (SNS) { startAudio(); setMusic(true); } else stopDemo(); });   // SNS 版はクリックで音を出す（止めない）
+{ const b = document.createElement('button'); b.textContent = '▶ ガイドツアー SNS版（縦長・約1分）'; b.style.borderColor = '#9fff9f'; b.onclick = () => { location.search = '?sns'; }; warp.prepend(b); }
 { const b = document.createElement('button'); b.textContent = '▶ ガイドツアー（G）'; b.style.borderColor = '#9fff9f'; b.style.fontWeight = '700'; b.onclick = () => { b.blur(); startDemo(); }; warp.prepend(b); }
 
 // ===== 起動 =====
 const clock = new THREE.Clock();
 let elapsed = 0, frameNo = 0;
-function frame() {
-  const dt = Math.min(clock.getDelta(), 0.1);
+function frame(fixedDt) {
+  const dt = fixedDt ?? Math.min(clock.getDelta(), 0.1);
   elapsed += dt;
   updateDemo(dt);
   if (space.on) updateSpaceCamera(); else { if (!demo.on) updatePlayer(dt); updateCamera(); }
@@ -3522,6 +3864,7 @@ function frame() {
   updateElevators(elapsed);
   updateLandmarks(elapsed);
   updateHubStation(elapsed);
+  updateShipyards(elapsed);
   updateAxisTrains(elapsed);
   updateLocalLife(dt, elapsed);
   updateBirds(dt, elapsed);
@@ -3535,17 +3878,20 @@ function frame() {
   renderFrame(dt);
   drawMinimap();
   hud(dt);
-  requestAnimationFrame(frame);
+  if (!REC) requestAnimationFrame(() => frame());
 }
+window.__frame = dt => frame(dt);
 setTimeout(() => {
   build();
   makePost();
   drawMinimapBase();
   PRESETS[0][1]();
   el('loading').classList.add('hidden');
-  window.__ready = true; window.__demo = demo; window.__startDemo = startDemo; window.__demoShot = demoStartShot; window.__lm = landmarks; window.__demoTitle = n => SHOTS[n] && SHOTS[n].t; window.__player = player; window.__ships = ships; window.__trains = vehicles.trains; window.__night = toggleNight; window.__space = space; window.__toggleSpace = toggleSpace; window.__viewEntrance = viewEntrance; window.__extShips = extShips; window.__post = post; window.__t = () => elapsed; window.__scene = scene; window.__axis = () => axisCarMesh;
-  frame();
-  if (new URLSearchParams(location.search).has('demo')) startDemo();
+  window.__ready = true; window.__demo = demo; window.__startDemo = startDemo; window.__demoShot = demoStartShot; window.__lm = landmarks; window.__demoTitle = n => SHOTLIST()[n] && SHOTLIST()[n].t; window.__demoDur = n => SHOTLIST()[n].dur; window.__player = player; window.__ships = ships; window.__trains = vehicles.trains; window.__night = toggleNight; window.__space = space; window.__toggleSpace = toggleSpace; window.__viewEntrance = viewEntrance; window.__extShips = extShips; window.__post = post; window.__t = () => elapsed; window.__scene = scene; window.__axis = () => axisCarMesh;
+  frame(REC ? 0 : undefined);
+  if (SNS) document.documentElement.classList.add('sns');
+  if (REC) document.documentElement.classList.add('rec');
+  if (new URLSearchParams(location.search).has('demo') || SNS) startDemo();
 }, 30);
 </script>
 </body>
