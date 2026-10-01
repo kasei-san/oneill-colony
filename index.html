@@ -292,7 +292,7 @@ function patch(mat, opts = {}) {
     }
     if (opts.building) {
       fs = fs.replace('#include <color_fragment>', `#include <color_fragment>
-        float winMask = 0.0; vec3 winRoom = vec3(0.0);
+        float winMask = 0.0, oldT = 0.0; vec3 winRoom = vec3(0.0);
         // 建物ごとの色ムラと低周波の汚れ
         diffuseColor.rgb *= 0.88 + 0.22 * vBId;
         ${opts.vehicle ? '' : 'diffuseColor.rgb *= 0.9 + 0.2 * bNoise(vCW.xy * 0.05 + vCW.z * 0.03 + vBId * 17.0);'}
@@ -302,8 +302,10 @@ function patch(mat, opts = {}) {
           vec2 g = vec2(hc / 3.2, vBL.y / 3.6);
           vec2 f = fract(g);
           vec2 fw = max(fwidth(g), vec2(1e-4));
-          float mx = smoothstep(0.15 - fw.x, 0.15 + fw.x, f.x) - smoothstep(0.85 - fw.x, 0.85 + fw.x, f.x);
-          float my = smoothstep(0.28 - fw.y, 0.28 + fw.y, f.y) - smoothstep(0.88 - fw.y, 0.88 + fw.y, f.y);
+          ${opts.vehicle ? '' : `oldT = step(${ZONE.indEnd.toFixed(1)}, vCW.z) * step(vCW.z, ${(ZONE.oldEnd + 160).toFixed(1)}) * step(vBS.y, 44.0) * step(vBS.x, 24.0);`}  // 旧市街のアパート
+          float wx0 = mix(0.15, 0.3, oldT), wx1 = mix(0.85, 0.66, oldT), wy0 = mix(0.28, 0.36, oldT), wy1 = mix(0.88, 0.78, oldT);
+          float mx = smoothstep(wx0 - fw.x, wx0 + fw.x, f.x) - smoothstep(wx1 - fw.x, wx1 + fw.x, f.x);
+          float my = smoothstep(wy0 - fw.y, wy0 + fw.y, f.y) - smoothstep(wy1 - fw.y, wy1 + fw.y, f.y);
           float m = clamp(mx, 0.0, 1.0) * clamp(my, 0.0, 1.0);
           m *= step(1.0, halfW - abs(hc)) * step(vBL.y, vBS.y - 1.0); // 角と屋上の縁には窓を作らない
           float lod = smoothstep(0.35, 0.9, max(fw.x, fw.y));
@@ -332,7 +334,14 @@ function patch(mat, opts = {}) {
             vec3 farRoom = vec3(0.75, 0.6, 0.42) * (0.5 + 0.6 * bHash(vec3(cid + 7.0, vBId * 13.0))) * mix(0.6, onF * 1.5, uNight);
             winRoom = mix(winRoom, farRoom, lod); }
           float rnd = bHash(vec3(floor(g), vBId * 57.0));
-          diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.16, 0.19, 0.24), vec3(0.42, 0.47, 0.54), rnd * rnd), winMask);
+          diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.16, 0.19, 0.24), vec3(0.42, 0.47, 0.54), rnd * rnd) * mix(1.0, 0.45, oldT), winMask);
+          if (oldT > 0.5) {
+            // 鉄格子（窓の中の縦の棒）と、上から垂れた汚れの筋
+            float bar = 1.0 - smoothstep(0.0, max(fw.x * 1.5, 0.02), abs(fract(f.x * 3.0) - 0.5) - 0.42);
+            winMask *= 1.0 - 0.8 * bar * (1.0 - lod); winRoom *= 1.0 - 0.8 * bar;
+            float streak = bNoise(vec2(hc * 0.9 + vBId * 31.0, vBL.y * 0.04)) * bNoise(vec2(hc * 0.23, vBL.y * 0.15 + vBId * 7.0));
+            diffuseColor.rgb *= 1.0 - 0.45 * smoothstep(0.15, 0.55, streak) * (1.0 - winMask);
+          }
           // 角・屋上の縁を明るく（面取りの代わり）
           float eDist = min(halfW - abs(hc), vBS.y - vBL.y);
           float eW = max(0.3, fwidth(hc) * 1.5);
@@ -346,10 +355,10 @@ function patch(mat, opts = {}) {
       fs = fs.replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
         roughnessFactor = mix(roughnessFactor, 0.05, winMask);`);
       fs = fs.replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
-        metalnessFactor = mix(metalnessFactor, 0.5, winMask);`);
+        metalnessFactor = mix(metalnessFactor, 0.5, winMask) * (1.0 - 0.7 * oldT);`);
       // 部屋の明かりは自発光扱い。斜めから見るほど反射に負けて見えなくなる
       fs = fs.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-        totalEmissiveRadiance += winRoom * winMask * mix(1.0, 1.4, uNight) * (1.0 - (1.0 - uNight) * pow(1.0 - abs(dot(normal, normalize(vViewPosition))), 2.0));`);
+        totalEmissiveRadiance += winRoom * winMask * mix(1.0, 1.4, uNight) * (1.0 + 1.6 * oldT * uNight) * (1.0 - (1.0 - uNight) * pow(1.0 - abs(dot(normal, normalize(vViewPosition))), 2.0));`);
     }
     fs = fs.replace('#include <opaque_fragment>', `{
         vec3 upW = -normalize(vec3(vCW.xy, 0.0) + vec3(1e-5));
@@ -680,16 +689,20 @@ function genStrip(k) {
       for (let n = 0; n < 6; n++) addTree(ch, s + rr(-16, 16), z + rr(-16, 16), rr(6, 9));
       continue;
     }
-    if (type === 'oldtown') {                        // 旧市街: 汚れた外壁の4〜8階建てアパートが細い路地をはさんでひしめく
-      rect('#8a7f6e', s, z, BLK, BLK);
-      for (let a = 0; a < 3; a++) for (let b = 0; b < 4; b++) {
-        const cs = s + (a - 1) * 31 + rr(-1.5, 1.5), cz = z + (b - 1.5) * 23.5 + rr(-1, 1);
-        const w = rr(22, 28), d = rr(17, 21), h = (4 + Math.floor(rand() * 5)) * 3;
-        const col = new THREE.Color(pick([0xa89070, 0x8f8270, 0xa08868, 0x7f786c, 0x988a84, 0x76847a, 0xb09068, 0x8a928a, 0xa07e70, 0x7e8c96, 0x9a7a5e])).multiplyScalar(rr(0.6, 0.85)).getHex();   // くすんで汚れた外壁
+    if (type === 'oldtown') {                        // 旧市街: 8〜14階の古いアパートがすき間なくひしめく（クーロン風）。暗くくすんだコンクリート
+      rect('#5e564c', s, z, BLK, BLK);
+      for (let a = 0; a < 4; a++) for (let b = 0; b < 4; b++) {
+        if (rand() < 0.06) continue;                                  // ところどころ細い路地
+        const cs = s + (a - 1.5) * 23.5 + rr(-0.6, 0.6), cz = z + (b - 1.5) * 23.5 + rr(-0.6, 0.6);
+        const w = rr(20.5, 23), d = rr(20.5, 23), h = (8 + Math.floor(rand() * 7)) * 3 + rr(-0.5, 0.5);
+        const col = new THREE.Color(pick([0x6a5e50, 0x5e564c, 0x72685a, 0x585450, 0x6a625a, 0x5a6058, 0x7a6a58, 0x605a54, 0x6e5a4a])).multiplyScalar(rr(0.7, 0.95)).getHex();
         addB(ch, cs, cz, w, d, 0, h, col);
-        if (rand() < 0.45) { addB(ch, cs + rr(-5, 5), cz + rr(-4, 4), rr(6, 10), rr(5, 8), h, rr(2.4, 3), pick([0x8a7a62, 0x9a9488, 0x7a7068]), false); ch.roof.push(th(cs), cz, h + 2.8, 9, 0.6, 7, pick([0x6a6f74, 0x7a4a33, 0x5f6a70])); } // 屋上の増築小屋
-        if (rand() < 0.6) ch.cyl.push(th(cs + rr(-8, 8)), cz + rr(-6, 6), h, 2.2, 2.4, 2.2, pick([0x2f5fa8, 0x2a2a2a, 0xe8e8e8]));  // 屋上の水タンク
-        for (let n = 0; n < 3; n++) if (rand() < 0.6) addB(ch, cs + (rand() < 0.5 ? -1 : 1) * (w / 2 + 0.5), cz + rr(-d / 3, d / 3), 1, 1.2, rr(4, h - 2), 0.8, 0xc8ccd0, false); // 壁のエアコン室外機
+        for (let n = Math.floor(rr(1, 4)); n > 0; n--) {             // 屋上に増築された小屋
+          const bh = rr(2.2, 3.6), x = cs + rr(-w / 3, w / 3), y = cz + rr(-d / 3, d / 3);
+          addB(ch, x, y, rr(3, 6), rr(3, 6), h, bh, pick([0x4a443c, 0x3a3630, 0x5a5048]), false);
+          if (rand() < 0.6) ch.roof.push(th(x), y, h + bh, 6.5, 0.5, 6.5, pick([0x5f6a70, 0x7a4a33, 0x6a6f74]));
+        }
+        if (rand() < 0.7) ch.cyl.push(th(cs + rr(-w / 3, w / 3)), cz + rr(-d / 3, d / 3), h, 2.2, 2.4, 2.2, pick([0x2f5fa8, 0x2a2a2a, 0xd8d8d0]));  // 水タンク
       }
       continue;
     }
@@ -1818,6 +1831,7 @@ function buildNeonSigns() {
 function updateResort(t) {
   if (adMat) adMat.color.setScalar((1.0 + 0.9 * U.uNight.value) * (space.on ? 0.3 : 1));
   if (neonDistrictMat) neonDistrictMat.color.setScalar((1.0 + 4.5 * U.uNight.value) * (space.on ? 0.3 : 1) * (0.94 + 0.06 * Math.sin(t * 23)));
+  oldNeonMat.color.setScalar(0.7 + 2.3 * U.uNight.value);
   if (lanternMat) { const n = U.uNight.value; lanternMat.color.setRGB(0.75 + 5 * n, 0.22 + 1.6 * n, 0.12 + 0.4 * n); stallMat.emissiveIntensity = 0.35 * n; }
   const r = LM.resort; if (!r) return;
   const nt = U.uNight.value;
@@ -3013,11 +3027,13 @@ function updateLOD() {
 }
 
 // ===== カメラ周辺のビルだけに足す細部（屋上設備・各階の庇・店先のひさし・煙突） =====
+const oldNeonMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1, 1, 1) });   // 旧市街の小さなネオン管（夜に明るくなる）
 const AWNING = [0xc0392b, 0x2e7d5b, 0x2f5fa8, 0xd8a531, 0x6b4f3a, 0xe8e2d4];
 function buildDetail(c) {
   const rnd = mulberry32(c.seed * 7919), rrd = (a, b) => a + (b - a) * rnd();
   const out = [];
   const put = (th, z, h0, w, h, d, col) => out.push(th, z, h0, w, h, d, col);
+  const neonBits = [];
   const b = c.src.bld;
   for (let o = 0; o < b.length; o += 7) {
     const [th, z, h0, w, h, d, col] = b.slice(o, o + 7), top = h0 + h;
@@ -3027,17 +3043,49 @@ function buildDetail(c) {
       if (rnd() < 0.5) put(th + rrd(-0.25, 0.25) * w / R, z + rrd(-0.25, 0.25) * d, top, 0.8, rrd(2.5, 3.6), 0.8, 0x7a6a5e);
       continue;
     }
-    if (z > ZONE.indEnd && z < ZONE.oldEnd + 160 && h0 === 0 && h < 30) {   // 旧市街のアパート: 店先のひさしや各階の庇の代わりに、ベランダと洗濯物
-      const E = th, faces = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+    if (z > ZONE.indEnd && z < ZONE.oldEnd + 160 && h0 === 0 && h < 44 && w < 24) {   // 旧市街のアパート（クーロン風の壁面と屋上）
+      const faces = [[1, 0], [-1, 0], [0, 1], [0, -1]].sort(() => rnd() - 0.5).slice(0, 2);   // 2面だけ（重さ対策）
+      const P = (fx, fz, a, out) => [th + (fx ? fx * (w / 2 + out) : a) / R, z + (fz ? fz * (d / 2 + out) : a)];
       for (const [fx, fz] of faces) {
-        if (rnd() < 0.35) continue;
-        const len = fx ? d : w;
-        for (let y = 3.2; y < top - 2; y += 3) for (let a = -len / 2 + 2.5; a < len / 2 - 2; a += rrd(4, 6)) {
-          if (rnd() < 0.45) continue;
-          const bs = fx ? (fx * (w / 2 + 0.6)) : a, bz = fz ? (fz * (d / 2 + 0.6)) : a;
-          put(E + bs / R, z + bz, y - 0.2, fx ? 1.2 : 3.2, 1.0, fz ? 1.2 : 3.2, pick([0x8a8478, 0x9a9488, 0x6f6a62]));            // ベランダの手すり壁
-          if (rnd() < 0.5) put(E + (fx ? bs + fx * 0.5 : bs) / R, z + (fz ? bz + fz * 0.5 : bz), y + 0.8, fx ? 0.1 : 2.4, 0.9, fz ? 0.1 : 2.4, pick([0xe8463a, 0x2f6fd8, 0xf2c230, 0xf4f4f4, 0x4caf50, 0xd8448a])); // 洗濯物
+        const len = fx ? d : w, wx = fx ? 1 : 0;                       // wx=1: 東西の面（奥行き方向に伸びる）
+        const sz = (along, across) => fx ? [across, along] : [along, across];
+        for (let n = Math.floor(rrd(1, 3)); n > 0; n--) {              // 壁を這う配管
+          const [ps, pz] = P(fx, fz, rrd(-len / 2 + 0.6, len / 2 - 0.6), 0.3);
+          put(ps, pz, 0, 0.45, top, 0.45, pick([0x5a5550, 0x6a4a3a, 0x4a4a4c]));
         }
+        for (let n = Math.floor(rrd(4, 9)); n > 0; n--) {              // エアコンの室外機
+          const [ps, pz] = P(fx, fz, rrd(-len / 2 + 0.7, len / 2 - 0.7), 0.35);
+          const [sw, sd] = sz(0.9, 0.7);
+          put(ps, pz, rrd(3, top - 2), sw, 0.6, sd, pick([0x9a9690, 0xb0aca4, 0x807a72]));
+        }
+        for (let n = rnd() < 0.7 ? Math.floor(rrd(1, 4)) : 0; n > 0; n--) {   // 鉄格子のベランダと洗濯物
+          const y = rrd(5, top - 5), a = rrd(-len / 3, len / 3), bl = rrd(3, 6);
+          const [ps, pz] = P(fx, fz, a, 0.8), [bw, bd] = sz(bl, 1.6);
+          put(ps, pz, y, bw, 0.15, bd, 0x3a3a3a);
+          const [gs, gz] = P(fx, fz, a, 1.55), [gw, gd] = sz(bl, 0.08);
+          put(gs, gz, y, gw, 1.8, gd, 0x2a2a2a);                       // 鉄格子（面として）
+          if (rnd() < 0.6) for (let j = 0; j < 4; j++) {
+            const [ls, lz] = P(fx, fz, a - bl / 2 + (j + 0.5) * bl / 4, 1.75), [lw, ld] = sz(0.6, 0.05);
+            put(ls, lz, y + 0.6, lw, rrd(0.5, 0.9), ld, pick([0xc04040, 0x4060c0, 0xe0e0d0, 0xe0c040, 0x40a060]));
+          }
+        }
+        if (rnd() < 0.4) {                                             // 屋上から垂れ下がるつる
+          const vl = rrd(2, 9), [vs, vz] = P(fx, fz, rrd(-len / 2, len / 2), 0.2), [vw, vd] = sz(rrd(0.4, 1.2), 0.3);
+          put(vs, vz, top - vl, vw, vl, vd, pick([0x2f5a24, 0x3a6a2a, 0x24461c, 0x4a7a30]));
+        }
+        for (let n = Math.floor(rrd(0, 3)); n > 0; n--) {              // 小さなネオン管
+          const [ns, nz] = P(fx, fz, rrd(-len / 3, len / 3), 0.15), [nw, nd] = sz(rrd(2, 5), 0.2);
+          neonBits.push(ns, nz, rrd(4, top - 3), nw, rrd(0.8, 2), nd, pick([0xff2040, 0xff60c0, 0xffd040, 0x40ffb0, 0xff8020]));
+        }
+      }
+      for (let n = Math.floor(rrd(1, 5)); n > 0; n--) {                // 屋上のアンテナの林
+        const ah = rrd(3, 10), as = th + rrd(-w / 2, w / 2) / R, az = z + rrd(-d / 2, d / 2);
+        put(as, az, top, 0.15, ah, 0.15, 0x2a2a2a);
+        if (rnd() < 0.4) put(as, az, top + ah * 0.8, 1.6, 0.1, 0.1, 0x2a2a2a);
+      }
+      for (let n = rnd() < 0.6 ? Math.floor(rrd(2, 7)) : 0; n > 0; n--) {   // 屋上の植物
+        const pw = rrd(0.8, 2.5);
+        put(th + rrd(-w / 2, w / 2) / R, z + rrd(-d / 2, d / 2), top, pw, pw, pw, pick([0x2f5a24, 0x3a6a2a, 0x24461c, 0x4a7a30]));
       }
       continue;
     }
@@ -3062,6 +3110,7 @@ function buildDetail(c) {
   }
   const grp = new THREE.Group();
   const det = instanced(GEO.box, M.detail, out, 7, { cast: true }); if (det) grp.add(det);
+  const nb = instanced(GEO.box, oldNeonMat, neonBits, 7, { cast: false }); if (nb) grp.add(nb);
   // 木を細かい版に差し替え（広葉樹と針葉樹）
   const tr = c.src.tree, broad = [], coni = [];
   for (let o = 0; o < tr.length; o += 7) (rnd() < 0.25 ? coni : broad).push(...tr.slice(o, o + 7));
@@ -3249,8 +3298,8 @@ const SHOTS = [
   { ch: '街区', t: '商店街', x: '発展しなかった駅の前には、アーケードのかかった昔ながらの商店街が残っているのだ。色とりどりの小さな店が並び、いつも人でにぎわっているのだ。', dur: 12, from: () => { const p = landmarks.shopSta || landmarks.samples.shop; go(STRIP_PHI[p.k] + p.s / R, p.z - 54, 3.2, 0, 0.03); }, d: { z: 75 } },   // アーケードの屋根の下を歩く
   { ch: '街区', t: '拡張境界地区', x: 'コロニーの街は、宇宙港のある端から奥へ少しずつ広がってきたのだ。端の畑から、工業地帯、開拓期にできた旧市街、そして新市街へ――時代ごとの街並みが、帯のように順番に並んでいるのだ。', dur: 16,
     from: () => go(STRIP_PHI[0] - 200 / R, ZONE.farmEnd - 500, 260, 0, -0.32), d: { z: 1500, pitch: 0.12 } },
-  { ch: '街区', t: '旧市街', x: '開拓者たちが最初に住んだ旧市街は、今では古いアパートがひしめく下町になっているのだ。再開発の高層ビルが少しずつ建ち始めているけど、空き地の前には「再開発反対」の横断幕が並び、住民と市の話し合いは今も続いているのだ。', dur: 15,
-    from: () => { const r = landmarks.redev[0] || { s: 0, z: (ZONE.indEnd + ZONE.oldEnd) / 2 }; lookAt(0, r.s - 140, r.z - 160, r.s, r.z, 45, 0.85); }, d: { z: 60, h: -8 } },
+  { ch: '街区', t: '旧市街', x: '開拓者たちが最初に住んだ旧市街は、今では古いアパートがすき間なくひしめく貧民街になっているのだ。路地の先には、新市街のきれいな高層ビルがそびえているのだ。市は再開発を進めようとしているけど、「再開発反対」の横断幕を掲げる住民の反対にあって、話し合いは今も続いているのだ。', dur: 15,
+    from: () => { const i = 16, sx = 4 * P + 6.5; go(STRIP_PHI[0] + sx / R, oldEndAt(0, i) - 520, 7, 0, 0.2); }, d: { z: 220, pitch: 0.06 } },   // 旧市街の路地から、境目の向こうの新市街の高層ビルを見上げる
   { ch: '街区', t: '寺社と鎮守の森', x: 'コロニーの人々は、地球から神様もいっしょに連れてきたのだ。朱色の鳥居と鎮守の森が、住宅地の中に静かにたたずんでいるのだ。', dur: 11, from: () => { const t = landmarks.samples.temple, n = t.ns || { s: t.s + 110, z: t.z }, dx = n.s - t.s, dz = n.z - t.z, L = Math.hypot(dx, dz) || 1; lookAt(t.k, t.s - dx / L * 120, t.z - dz / L * 120, t.s + dx * 0.5, t.z + dz * 0.5, 38, 0.7); }, d: { h: -6 } },  // 寺社の向こうに歓楽街
   { ch: '街区', t: '工場と倉庫街', x: '宇宙港のある端の畑のすぐ奥には、コロニーの暮らしを支える工場や倉庫が集まっているのだ。宇宙港から運び込まれた資材を加工する、トラックが行き交う「街の裏側」なのだ。', dur: 11, from: atSample('factory', 55, 60), d: { z: 60, yaw: 0.15 } },
   { ch: '街区', t: '農業区画', x: '両端の蓋の近くには、畑とガラスの温室が広がっているのだ。最初の作物の枝豆もここで育ったのだ。300万人の食べ物の多くは、このコロニーの中で育てているのだ。', dur: 12, from: () => { const sp = landmarks.samples.farm; lookAt(sp.k, sp.s, sp.z - 80, sp.s, sp.z - 500, 55, 0.75); }, d: { z: -90, yaw: 0.12 } },   // 畑の中から蓋の方（一面の畑）を向く
