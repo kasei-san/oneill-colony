@@ -42,6 +42,8 @@
   #sns-top > *, #sns-bot > * { transition: opacity 0.5s; }
   .sns #demo-cap, .sns .panel, .rec #demo-bar { display: none !important; }
   .sns #demo-bar { right: auto; left: 12px; bottom: 12px; }
+  #demo-start { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; background: rgba(4,8,16,0.55); cursor: pointer; }
+  #demo-start button { padding: 14px 28px; font-size: 18px; font-weight: 700; color: #fff; background: rgba(6,10,20,0.75); border: 1px solid #9fff9f; border-radius: 28px; cursor: pointer; }
   .sns #demo-stop { display: none; }   /* 動作確認用: 縦長の枠の外（左下）に操作ボタン */
   .rec #sns-top > *, .rec #sns-bot > *, .rec #demo-fade { transition: none !important; }
   html.sns, html.sns body { background: #111; }
@@ -76,6 +78,7 @@
 <div id="sns-frame"><div id="sns-top"><div class="ch"></div><div class="t"></div></div><div id="sns-bot"><div class="x"></div></div></div>
 <div id="demo-fade"></div>
 <div id="demo-cap"><div class="ch"></div><h2></h2><p></p></div>
+<div id="demo-start" class="hidden"><button>▶ クリックでガイドツアーを始める（音が出ます）</button></div>
 <div id="demo-bar" class="hidden"><span id="demo-pos"></span><button id="demo-prev" title="前へ（←）">⏮</button><button id="demo-pause" title="一時停止（Space）">⏸</button><button id="demo-next" title="次へ（→）">⏭</button><button id="demo-stop" title="終了（Esc）">✕</button></div>
 <div id="mapbox" class="panel">
   <div class="cap">展開図（横=周方向 360° / 縦=軸方向）</div>
@@ -3815,6 +3818,7 @@ function updateDemo(dt) {
 }
 function startDemo() {
   demo.on = true; keys.clear(); setDemoPause(false);
+  el('demo-start').classList.add('hidden');
   if (!REC) setMusic(true);
   document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden'));
   demoEl.bar.classList.remove('hidden');
@@ -3891,7 +3895,12 @@ setTimeout(() => {
   frame(REC ? 0 : undefined);
   if (SNS) document.documentElement.classList.add('sns');
   if (REC) document.documentElement.classList.add('rec');
-  if (new URLSearchParams(location.search).has('demo') || SNS) startDemo();
+  // ?demo・?sns はクリックで始める（ブラウザはクリック前に音を出させないので、自動で始めると BGM が鳴らない）。動画の書き出しはすぐ始める
+  if (REC) startDemo();
+  else if (new URLSearchParams(location.search).has('demo') || SNS) {
+    const st = el('demo-start'); st.classList.remove('hidden'); document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden'));
+    st.onclick = () => { st.classList.add('hidden'); startAudio(); startDemo(); };
+  }
 }, 30);
 </script>
 </body>
