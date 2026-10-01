@@ -1133,6 +1133,26 @@ function build() {
   const tieMesh = instanced(GEO.box, patch(new THREE.MeshStandardMaterial({ color: 0x5a4a3c, roughness: 0.9 })), ties, 6, { color: false, cast: false });
   scene.add(railMesh, tieMesh);
   const concMesh = new THREE.Mesh(conc.geo(), M.concrete); concMesh.receiveShadow = concMesh.castShadow = true;
+  // 窓側のエレベーター駅（軸の3駅の真下の橋）のまわり: 橋と同じ高さで窓ガラスの上に張り出す駐車場デッキ
+  const park = [], parkCars = [], parkLines = [];
+  for (const Z of [NEW_YARD_Z, HUB_Z, ZG_Z]) for (const psi of WIN_PHI) for (const side of [-1, 1]) {
+    const zc = Z + side * 70, wS = 150, dZ = 100;                     // デッキ: 周方向150m × 軸方向100m（橋の両側）
+    deck.ringBand(R, R + 2.5, zc - dZ / 2, zc + dZ / 2, psi + (side < 0 ? 0.004 : 0.004) - wS / 2 / R, psi + wS / 2 / R, 24);
+    for (const ds of [-60, -20, 20, 60]) for (const dz of [-38, 38]) park.push(psi + ds / R, zc + dz, -(GLASS_R - R), 2, GLASS_R - R - 2.5, 2, 0x9aa0a8);   // ガラスまでの支柱
+    for (let row = 0; row < 3; row++) for (let c = 0; c < 22; c++) {
+      const ds = -62 + c * 5.9, dz = -36 + row * 30 + (side > 0 ? 6 : -6);
+      parkLines.push(psi + (ds - 2.95) / R, zc + dz, 0.02, 0.15, 0.05, 5.4, 0xf0f0f0);
+      if (rand() < 0.75) parkCars.push(psi + ds / R, zc + dz + (row % 2 ? 0.3 : -0.3), 0, 1, 1, 1, pick(PAL.car));
+    }
+    if (side > 0) {                                                    // 管理棟（デッキの端、窓の上に建つ小さなビル）
+      park.push(psi + 52 / R, zc + 30, 0, 22, 16, 18, 0xe8ecf0);
+      park.push(psi + 52 / R, zc + 30, 16, 14, 4, 10, 0xc8d4de);
+    }
+  }
+  scene.add(instanced(GEO.box, M.bld, park, 7, { cast: false }), instanced(GEO.box, M.detail, parkLines, 7, { cast: false }));
+  { const pm = new THREE.InstancedMesh(GEO.car, M.carShape, parkCars.length / 7);
+    for (let q = 0; q < parkCars.length / 7; q++) { writeCar(pm.instanceMatrix.array, q * 16, parkCars[q * 7], parkCars[q * 7 + 1], false, q % 2 ? 1 : -1); pm.setColorAt(q, new THREE.Color(parkCars[q * 7 + 6])); }
+    pm.computeBoundingSphere(); scene.add(pm); }
   const deckMesh = new THREE.Mesh(deck.geo(), M.deck); deckMesh.receiveShadow = deckMesh.castShadow = true;
   const miscMesh = instanced(GEO.box, M.concrete, misc, 6, { color: false });
   scene.add(concMesh, deckMesh, miscMesh);
