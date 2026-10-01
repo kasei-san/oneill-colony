@@ -86,7 +86,7 @@ const BRIDGE_Z = [];
 for (let j = 6; j < NZ - 1; j += 10) BRIDGE_Z.push(zCenter(j) + P / 2);
 const RIVER_I = [7, 20, 10];
 const RESORT = { k: 1, i0: NS - 6, j0: 35, j1: 42 };
-const RIVERSIDE = { k: 2, j0: 76, j1: 78 };                  // 屋台が並ぶ川沿い（川の両岸の遊歩道、3ブロック分）
+const RIVERSIDE = { k: 2, j0: 74, j1: 82 };                  // 屋台が並ぶ川沿い（川の両岸の遊歩道、9ブロック分）
 const RIVER_HW = 32;                                          // 川の水面の半幅（両岸に遊歩道を残す）   // 観覧車と遊園地のエリア（第2陸地の東端）
 
 function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
@@ -414,7 +414,8 @@ function gradientSprite(stops) {
 // ===== マテリアル =====
 const M = {
   bld: patch(new THREE.MeshStandardMaterial({ roughness: 0.8, metalness: 0.05 }), { building: true }),
-  roof: patch(new THREE.MeshStandardMaterial({ roughness: 0.85 })),
+  roof: patch(new THREE.MeshStandardMaterial({ roughness: 0.85, side: THREE.DoubleSide })),
+  tank: patch(new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.5 })),
   tree: patch(new THREE.MeshStandardMaterial({ roughness: 0.95, vertexColors: true }), { wind: true }),
   water: patch(new THREE.MeshStandardMaterial({ color: 0x1d3f52, roughness: 0.03, metalness: 0.0 })),
   concrete: patch(new THREE.MeshStandardMaterial({ color: 0xc4c0b8, roughness: 0.85, side: THREE.DoubleSide })),
@@ -477,6 +478,19 @@ function updateEnv(dt) {
 
 const GEO = {
   box: new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0),
+  cyl: new THREE.CylinderGeometry(0.5, 0.5, 1, 18).translate(0, 0.5, 0),
+  // のこぎり屋根: 東西方向に4つの山（片側が垂直な採光面）、南北に伸びる
+  saw: (() => {
+    const p = [], N = 4, w = 1 / N;
+    for (let i = 0; i < N; i++) {
+      const x0 = -0.5 + i * w, x1 = x0 + w;
+      const q = (a, b, c, d) => p.push(...a, ...b, ...c, ...a, ...c, ...d);
+      q([x0, 0, -0.5], [x0, 0, 0.5], [x1, 1, 0.5], [x1, 1, -0.5]);      // 斜面
+      q([x1, 1, -0.5], [x1, 1, 0.5], [x1, 0, 0.5], [x1, 0, -0.5]);      // 垂直面（ガラス）
+      p.push(x0, 0, -0.5, x1, 1, -0.5, x1, 0, -0.5, x0, 0, 0.5, x1, 0, 0.5, x1, 1, 0.5); // 妻側
+    }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(p, 3)); g.computeVertexNormals(); return g;
+  })(),
   roof: new THREE.ConeGeometry(Math.SQRT1_2, 1, 4, 1).rotateY(Math.PI / 4).translate(0, 0.5, 0),
   tree: (() => {
     const markTrunk = g => { const c = g.attributes.color, a = new Float32Array(c.count); for (let i = 0; i < c.count; i++) a[i] = c.getX(i) > c.getZ(i) * 1.5 ? 1 : 0; g.setAttribute('aTrunk', new THREE.BufferAttribute(a, 1)); return g; };
@@ -510,7 +524,7 @@ const stripCanvases = [];
 function getChunk(k, i, j) {
   const key = `${k}-${Math.floor(i / 14)}-${Math.floor(j / 10)}`;
   let c = chunks.get(key);
-  if (!c) { c = { k, sSum: 0, zSum: 0, n: 0, bld: [], roof: [], tree: [], far: [] }; chunks.set(key, c); }
+  if (!c) { c = { k, sSum: 0, zSum: 0, n: 0, bld: [], roof: [], tree: [], far: [], cyl: [], saw: [], car: [] }; chunks.set(key, c); }
   return c;
 }
 
@@ -585,8 +599,10 @@ function genStrip(k) {
     else if (rand() < 0.012) type = 'campus';
     else if (c > 0.4 && c < 0.8 && rand() < 0.06) type = 'danchi';
     else if (rand() < 0.3 + 0.35 * (1 - c) + cb * 0.3) type = 'mid';
+    else if ((i > 0 && blockTypes[k][(i - 1) * NZ + j] === 'temple' || j > 0 && blockTypes[k][i * NZ + j - 1] === 'temple') && rand() < 0.8) type = 'forest'; // 鎮守の森は隣の街区まで続く
     else { const r = rand(); type = r < 0.07 ? 'school' : r < 0.11 ? 'shop' : r < 0.14 ? 'temple' : 'res'; }
-    if (!landmarks.samples[type] && k === 0) landmarks.samples[type] = { k, s, z };
+    if (!landmarks.samples[type] && k === 0 && Math.abs(z) < HL - (type === 'farm' ? 500 : 1600)) landmarks.samples[type] = { k, s, z }; // 見本は蓋から離れた場所（カメラが蓋にめり込まない）
+    if (type === 'shop' && !landmarks.shopSta && nearPlainTerm(s, z)) { const t = terms.find(t => t.kind === 'plain' && Math.hypot(s, z - t.z) < 260); landmarks.shopSta = { k, s, z, tz: t.z }; }
     blockTypes[k][i * NZ + j] = type;
     neonBlk = (type === 'down' || type === 'mid') && (neonC.some(c => Math.hypot(s - c.s, z - c.z) < c.r) || (tm && tm.t.kind === 'neon'));
     if (neonBlk) neonMap[(j * NS + i) * 4] = 255;
@@ -608,14 +624,35 @@ function genStrip(k) {
       for (const sd of [-1, 1]) for (let zz = -40; zz < 44; zz += 13) addHouse(ch, s + sd * 36, z + zz, rr(9, 12), rr(9, 11), rr(5.5, 7), pick(PAL.house), pick(PAL.roof), rr(2.5, 3.5));
       continue;
     }
-    if (type === 'factory') {                        // 工場・倉庫: 大屋根の建屋、煙突、タンク
+    if (type === 'factory') {                        // 工場: のこぎり屋根の建屋・事務棟・タンク群・パイプラック・煙突・駐車場
       rect('#8f8c86', s, z, BLK, BLK);
-      addB(ch, s - 14, z - 12, 60, 62, 0, rr(10, 14), pick([0xb8b4ac, 0x9aa0a8, 0xc8c0b0]));
-      addB(ch, s + 30, z + 28, 28, 34, 0, rr(8, 10), 0xa8aeb4);
-      for (let n = 0; n < 3; n++) addB(ch, s + 30, z - 38 + n * 15, 11, 11, 0, rr(8, 12), 0xe0e0d8);
+      const flip = rand() < 0.5 ? 1 : -1, sx = v => s + v * flip;
+      const shedC = pick([0xb8b4ac, 0x9aa0a8, 0xc8c0b0, 0xa8b0a0]), wallH = rr(7, 10);
+      addB(ch, sx(-20), z - 8, 50, 66, 0, wallH, shedC, false);
+      ch.saw.push(th(sx(-20)), z - 8, wallH, 50, rr(3, 4.5), 66, pick([0x6f767e, 0x8a5b3d, 0x5d6b78]));
+      rect('#55595e', sx(-20), z - 8, 50, 66);
+      addB(ch, sx(-28), z + 37, 34, 12, 0, rr(9, 13), 0xe8e4dc);                              // 事務棟
+      const tanks = 2 + Math.floor(rand() * 3);
+      for (let n = 0; n < tanks; n++) {
+        const d = rr(9, 14), tx = sx(18 + (n % 2) * 16), tz = z - 30 + Math.floor(n / 2) * 18;
+        ch.cyl.push(th(tx), tz, 0, d, rr(8, 16), d, pick([0xe8e8e2, 0xd8d8d0, 0xc8ccd0]));
+        g.fillStyle = '#c8c8c0'; g.beginPath(); g.arc(tx, tz, d / 2, 0, TAU); g.fill();
+      }
+      // パイプラック: 柱を並べ、高さ6.5mに南北のパイプ2本と、タンクへ向かう東西のパイプ（addB の引数は s, z, 幅, 奥行き, 下端, 高さ, 色）
+      for (let n = 0; n < 6; n++) addB(ch, sx(8), z - 43 + n * 10, 0.8, 0.8, 0, 6.5, 0x7a7f86, false);
+      addB(ch, sx(7.4), z - 18, 1.1, 54, 6.5, 1.1, 0xb0b6be, false);
+      addB(ch, sx(8.8), z - 18, 1.1, 54, 6.5, 1.1, 0xc0392b, false);
+      for (let n = 0; n < Math.min(tanks, 2); n++) addB(ch, sx(13), z - 30 + n * 18, 10, 0.9, 6.0, 0.9, 0xd8a531, false);
       const ch_h = rr(28, 40);                         // 煙突は細くして窓が出ないようにする
-      addB(ch, s - 38, z + 38, 2.6, 2.6, 0, ch_h, 0xd8d8d0);
-      addB(ch, s - 38, z + 38, 2.8, 2.8, ch_h - 5, 3, 0xc0392b);
+      addB(ch, sx(-42), z - 40, 2.6, 2.6, 0, ch_h, 0xd8d8d0);
+      addB(ch, sx(-42), z - 40, 2.8, 2.8, ch_h - 5, 3, 0xc0392b);
+      // 駐車場
+      rect('#3f4247', sx(26), z + 30, 34, 30);
+      for (let a = 0; a < 6; a++) for (let b = 0; b < 2; b++) {
+        const px = sx(12 + a * 5.6), pz = z + 22 + b * 15;
+        g.fillStyle = '#e8e8e8'; g.fillRect(px - 2.8, pz - 2.6, 0.25, 5.2);
+        if (rand() < 0.7) ch.car.push(th(px), pz, 0, 1, 1, 1, pick(PAL.car));
+      }
       continue;
     }
     if (type === 'campus') {                         // 病院・大学: 中庭を囲む白い建物群
@@ -625,18 +662,34 @@ function genStrip(k) {
       for (let n = 0; n < 6; n++) addTree(ch, s + rr(-16, 16), z + rr(-16, 16), rr(6, 9));
       continue;
     }
+    if (type === 'forest') {                         // 鎮守の森（寺社のまわりの深い森）
+      rect('#3f6a30', s, z, BLK + 4, BLK + 4);
+      for (let n = 0; n < 55; n++) addTree(ch, s + rr(-46, 46), z + rr(-46, 46), rr(11, 18));
+      continue;
+    }
     if (type === 'temple') {                         // 寺社: 鎮守の森・参道・鳥居・本殿・墓地
       rect('#5f8d47', s, z, BLK, BLK); rect('#d8d0bc', s, z - 10, 7, 74);
       addHouse(ch, s, z + 20, 24, 18, 6, 0x8b5a3c, 0x3a3f45, 9);
       for (const zz of [-40, -24]) { addB(ch, s - 4.5, z + zz, 1, 1, 0, 7, 0xd0302a, false); addB(ch, s + 4.5, z + zz, 1, 1, 0, 7, 0xd0302a, false); addB(ch, s, z + zz, 13, 1.2, 7, 0.9, 0xd0302a, false); }
       for (let a = 0; a < 5; a++) for (let b = 0; b < 4; b++) addB(ch, s + 22 + a * 4, z - 38 + b * 5, 1.2, 0.8, 0, 1.4, 0x9a9a98, false);
-      for (let n = 0; n < 22; n++) { const ts = s + rr(-44, 44), tz = z + rr(-44, 44); if (Math.abs(ts - s) < 14 && tz < z + 32) continue; addTree(ch, ts, tz, rr(9, 15)); }
+      for (let n = 0; n < 60; n++) { const ts = s + rr(-45, 45), tz = z + rr(-45, 45); if (Math.abs(ts - s) < 8 && tz < z + 34) continue; if (Math.abs(ts - s) < 15 && Math.abs(tz - z - 20) < 12) continue; addTree(ch, ts, tz, rr(10, 17)); }
       continue;
     }
     if (type === 'farm') {                           // 農業区画: 畑の帯とガラスの温室
       const greenhouse = rand() < 0.5;
       for (let n = 0; n < 8; n++) rect(pick(['#7aa84e', '#a8c060', '#8f7a50', '#c8b860', '#5f9a48']), s - BLK / 2 + n * BLK / 8 + BLK / 16, z, BLK / 8 - 1.5, BLK);
       if (greenhouse) for (let n = 0; n < 5; n++) { addB(ch, s - 38 + n * 19, z, 14, 86, 0, 3.2, 0xdde8ee, false); ch.roof.push(th(s - 38 + n * 19), z, 3.2, 14, 2.4, 86, 0xe8f2f6); }
+      else if (rand() < 0.7) {                         // 農家の倉庫とサイロ（区画の隅）
+        const cx = s + (rand() < 0.5 ? -1 : 1) * 30, cz = z + (rand() < 0.5 ? -1 : 1) * 30;
+        rect('#a8a090', cx, cz, 32, 32);
+        addHouse(ch, cx - 4, cz, 16, 22, 6, pick([0x9a3a2a, 0xb8b0a0, 0x6f767e]), pick([0x55514c, 0x7a4033, 0x4a5866]), 4);
+        const ns = 1 + Math.floor(rand() * 3);
+        for (let n = 0; n < ns; n++) {
+          const d = rr(5, 7), sh = rr(14, 22), x = cx + 9, zz = cz - 9 + n * 8;
+          ch.cyl.push(th(x), zz, 0, d, sh, d, pick([0xd8d8d0, 0xc8ccd0, 0x8aa0b0]));
+          ch.roof.push(th(x), zz, sh, d * 0.75, d * 0.45, d * 0.75, 0x9aa0a8);
+        }
+      }
       continue;
     }
     if (type === 'danchi') {                         // 団地: 同じ形の中層住宅が平行に並ぶ
@@ -827,6 +880,10 @@ function build() {
     const t = instanced(GEO.tree, M.tree, c.tree, 7); if (t) near.add(t);
     c.treeLow = t;
     const f = instanced(GEO.box, M.bld, c.far, 7, { cast: false }); if (f) far.add(f);
+    const cy = instanced(GEO.cyl, M.tank, c.cyl, 7); if (cy) near.add(cy);
+    const cyF = instanced(GEO.cyl, M.tank, c.cyl, 7, { cast: false }); if (cyF) far.add(cyF);
+    const sw = instanced(GEO.saw, M.roof, c.saw, 7); if (sw) near.add(sw);
+    const pc = instanced(GEO.car, M.carShape, c.car, 7, { cast: false }); if (pc) near.add(pc);
     scene.add(near, far);
     lodChunks.push({ center: cyl(R, STRIP_PHI[c.k] + sMid / R, zMid), near, far, src: c, detail: null, seed: lodChunks.length + 1 });
   }
@@ -996,7 +1053,12 @@ function build() {
   for (let x = 0; x < 128; x += 32) mg.fillRect(x, 0, 2, 1024);
   mg.fillStyle = '#8a929e'; mg.fillRect(0, 0, 3, 1024); mg.fillRect(125, 0, 3, 1024);
   const mirrorTex = new THREE.CanvasTexture(mc); mirrorTex.colorSpace = THREE.SRGBColorSpace;
-  const mirrorMat = new THREE.MeshBasicMaterial({ map: mirrorTex, side: THREE.BackSide, fog: false, depthWrite: false }); // 窓に向いた鏡面
+  // ミラーは細長い板を並べたすだれ状（板のすき間から星が見える。夜に閉じても完全にはふさがない）
+  const [slatCv, sg2] = canvas(512, 4);
+  sg2.fillStyle = '#fff'; sg2.fillRect(0, 0, 512, 4); sg2.fillStyle = '#000';
+  for (let n = 0; n < 16; n++) sg2.fillRect(n * 32 + 26, 0, 6, 4);
+  const slatTex = new THREE.CanvasTexture(slatCv);
+  const mirrorMat = new THREE.MeshBasicMaterial({ map: mirrorTex, alphaMap: slatTex, alphaTest: 0.5, side: THREE.BackSide, fog: false, depthWrite: false }); // 窓に向いた鏡面
   // 太陽（+z の彼方）の光が鏡で反射してカメラに届く向きだと強く光る
   mirrorMat.onBeforeCompile = sh => {
     sh.uniforms.uMirrorSun = mirrorSun; sh.uniforms.uMirrorSpace = mirrorSpace;
@@ -1018,7 +1080,7 @@ function build() {
   bg.fillStyle = '#2a2e34'; for (let y = 0; y < 1024; y += 32) bg.fillRect(0, y, 128, 3); for (let x = 0; x < 128; x += 32) bg.fillRect(x, 0, 3, 1024);
   bg.fillStyle = '#555b63'; for (let y = 16; y < 1024; y += 128) bg.fillRect(0, y, 128, 8);
   const backTex = new THREE.CanvasTexture(bc); backTex.colorSpace = THREE.SRGBColorSpace;
-  const mirrorBackMat = new THREE.MeshBasicMaterial({ map: backTex, side: THREE.FrontSide, fog: false });
+  const mirrorBackMat = new THREE.MeshBasicMaterial({ map: backTex, alphaMap: slatTex, alphaTest: 0.5, side: THREE.FrontSide, fog: false });
   for (const psi of WIN_PHI) {
     const out = new THREE.Vector3(Math.cos(psi), Math.sin(psi), 0), east = new THREE.Vector3(-Math.sin(psi), Math.cos(psi), 0);
     const hw = (GLASS_R + 60) * Math.sin(SECTOR / 2) * 1.04;
@@ -1154,7 +1216,9 @@ function buildElevators() {
   scene.add(instanced(GEO.box, sm, shaft, 6, { color: false }));
   scene.add(instanced(GEO.box, sm, stations, 6, { color: false }));
   scene.add(instanced(GEO.box, elevLightMat, rails, 6, { color: false, cast: false }));
-  elevCabMesh = new THREE.InstancedMesh(GEO.box, elevCabMat, elevators.length * 2);
+  // かごは窓の付いた3両編成の電車にして、蓋に沿って昇り降りするのがわかるようにする
+  elevCabMesh = new THREE.InstancedMesh(GEO.box, M.train, elevators.length * 2 * 3);
+  for (let n = 0; n < elevators.length * 2; n++) for (let c = 0; c < 3; c++) elevCabMesh.setColorAt(n * 3 + c, new THREE.Color(c === 0 ? 0xf2c230 : 0xf4f6f8));
   elevCabMesh.frustumCulled = false;
   scene.add(elevCabMesh);
 }
@@ -1166,7 +1230,7 @@ function updateElevators(t) {
       const u = ((t / e.period + e.ph + c * 0.5) % 1);
       const q = u < 0.45 ? u / 0.45 : u < 0.5 ? 1 : u < 0.95 ? 1 - (u - 0.5) / 0.45 : 0;  // 上って停車、下って停車
       const h = e.top * q * q * (3 - 2 * q);
-      writeBox(a, (i * 2 + c) * 16, e.th + (c ? 8.5 : -8.5) / R, e.z, h, 10, 14, 8);
+      for (let n = 0; n < 3; n++) writeBox(a, ((i * 2 + c) * 3 + n) * 16, e.th + (c ? 8.5 : -8.5) / R, e.z, h + n * 19, 9, 18, 7.5);
     }
   });
   elevCabMesh.instanceMatrix.needsUpdate = true;
@@ -1459,6 +1523,13 @@ function buildResort(zb) {
   for (let i = 0; i < 60; i++) { const p = curve.getPoint(i / 60); const c = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.7, p.y, 6), sup); c.position.set(p.x, p.y / 2, p.z); coaster.add(c); }
   const cars = new THREE.InstancedMesh(new THREE.BoxGeometry(2.6, 1.6, 4).translate(0, 1.4, 0), paint(0x2f6fd8), 6);
   coaster.add(cars);
+  { // レールに沿った電飾と、支柱を照らす光
+    const NP = 360, lp = new Float32Array(NP * 3), lc = new Float32Array(NP * 3);
+    for (let i = 0; i < NP; i++) { const p = curve.getPointAt(i / NP); lp.set([p.x, p.y + 1.4, p.z], i * 3); }
+    const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.BufferAttribute(lp, 3)); lg.setAttribute('color', new THREE.BufferAttribute(lc, 3));
+    LM.coasterLights = new THREE.Points(lg, new THREE.PointsMaterial({ size: 1.6, vertexColors: true, sizeAttenuation: true }));
+    LM.coasterLights.visible = false; coaster.add(LM.coasterLights);
+  }
   place(coaster, 1230, zb + 200);
   // メリーゴーラウンド
   const merry = new THREE.Group();
@@ -1468,6 +1539,10 @@ function buildResort(zb) {
   const horses = new THREE.Group();
   for (let i = 0; i < 12; i++) { const h = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.6, 2.2), paint(pick(tc))); const a = i / 12 * TAU; h.position.set(Math.cos(a) * 10, 3, Math.sin(a) * 10); horses.add(h); }
   merry.add(horses);
+  { const pts = []; for (let i = 0; i < 48; i++) { const a = i / 48 * TAU; pts.push(Math.cos(a) * 15.5, 7.6, Math.sin(a) * 15.5); }
+    const mg = new THREE.BufferGeometry(); mg.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    LM.merryLights = new THREE.Points(mg, new THREE.PointsMaterial({ size: 1.4, color: new THREE.Color(6, 4.5, 2), sizeAttenuation: true }));
+    LM.merryLights.visible = false; merry.add(LM.merryLights); }
   place(merry, 1100, zb + 100);
   // フリーフォール（上下する座席の輪）
   const drop = new THREE.Group();
@@ -1576,7 +1651,7 @@ function buildNeonSigns() {
     const x = i * 64, y = 512, c = cols[(i + 3) % cols.length];
     ag.fillStyle = 'rgba(10,6,20,0.9)'; ag.fillRect(x + 4, y + 8, 56, 432);
     ag.strokeStyle = c; ag.lineWidth = 3; ag.shadowColor = c; ag.shadowBlur = 10; ag.strokeRect(x + 8, y + 12, 48, 424); ag.shadowBlur = 0;
-    [...t].forEach((ch, n) => glowText(ch, x + 32, y + 56 + n * (350 / Math.max(3, t.length)), 38, c));
+    [...t].forEach((ch, n) => glowText(ch === 'ー' ? '｜' : ch, x + 32, y + 56 + n * (350 / Math.max(3, t.length)), 38, c)); // 縦書きの長音は縦棒にする
   });
   const plainCols = ['#ff2fd0', '#2ff6ff', '#ffd23a', '#ff4a2a', '#9dff3a', '#3a8cff', '#ff6ad5', '#3affa0', '#ffffff', '#ff9a2a', '#c04aff', '#ff3a6a', '#4affea', '#f0ff4a', '#ff7ad8', '#7aa8ff'];
   plainCols.forEach((c, i) => {                                    // 最下段: 文字なしの光るパネル 64x64 を16色
@@ -1642,6 +1717,15 @@ function updateResort(t) {
   if (neonDistrictMat) neonDistrictMat.color.setScalar((1.0 + 4.5 * U.uNight.value) * (space.on ? 0.3 : 1) * (0.94 + 0.06 * Math.sin(t * 23)));
   if (lanternMat) { const n = U.uNight.value; lanternMat.color.setRGB(0.75 + 5 * n, 0.22 + 1.6 * n, 0.12 + 0.4 * n); stallMat.emissiveIntensity = 0.35 * n; }
   const r = LM.resort; if (!r) return;
+  const nt = U.uNight.value;
+  if (LM.coasterLights) {
+    LM.coasterLights.visible = LM.merryLights.visible = nt > 0.02;
+    if (nt > 0.02) {
+      const c = LM.coasterLights.geometry.attributes.color, col = new THREE.Color();
+      for (let i = 0; i < c.count; i++) { col.setHSL(((i / c.count) * 4 - t * 0.25) % 1 + 1, 0.9, 0.55).multiplyScalar(4 * nt); c.setXYZ(i, col.r, col.g, col.b); }
+      c.needsUpdate = true;
+    }
+  }
   const u0 = (t * 0.018) % 1, m = new THREE.Matrix4(), q = new THREE.Quaternion();
   for (let i = 0; i < 6; i++) {
     const u = (u0 - i * 0.0035 + 1) % 1, p = r.coaster.curve.getPointAt(u), tg = r.coaster.curve.getTangentAt(u);
@@ -2075,8 +2159,8 @@ function typeAt(th, z) {
   const t = blockTypes[k][i * NZ + j];
   return t === 'river' && k === RIVERSIDE.k && j >= RIVERSIDE.j0 && j <= RIVERSIDE.j1 ? 'riverside' : t;
 }
-const CAR_D = { school: 0.2, shop: 0.3, factory: 0.4, campus: 0.4, temple: 0.1, farm: 0.08, danchi: 0.25, plaza: 0.6, down: 1, mid: 0.55, res: 0.2, park: 0.1, river: 0.08, resort: 0.35, riverside: 0.15 };
-const PED_D = { school: 0.5, shop: 1, factory: 0.08, campus: 0.4, temple: 0.25, farm: 0.03, danchi: 0.3, plaza: 1, down: 1, mid: 0.45, res: 0.12, park: 0.3, river: 0.05, resort: 1, riverside: 1 };
+const CAR_D = { forest: 0.05, school: 0.2, shop: 0.3, factory: 0.4, campus: 0.4, temple: 0.1, farm: 0.08, danchi: 0.25, plaza: 0.6, down: 1, mid: 0.55, res: 0.2, park: 0.1, river: 0.08, resort: 0.35, riverside: 0.15 };
+const PED_D = { forest: 0.1, school: 0.5, shop: 1, factory: 0.08, campus: 0.4, temple: 0.25, farm: 0.03, danchi: 0.3, plaza: 1, down: 1, mid: 0.45, res: 0.12, park: 0.3, river: 0.05, resort: 1, riverside: 1 };
 const local = { cars: [], peds: [] };
 const LC = { n: LOW ? 250 : 600, r: 700 }, LP = { n: LOW ? 600 : 1600, r: 320 };
 let localCarMeshes, pedBodyMesh, pedSkinMesh;
@@ -2998,7 +3082,23 @@ function hud(dt) {
 
 // ===== ガイドツアー（デモ）: 宇宙から入港して街区と観光地をめぐり、夜景を見て、宇宙へ戻ってループする =====
 const preset = label => PRESETS.find(p => p[0].includes(label))[1];
-const atSample = key => () => { const sp = landmarks.samples[key]; go(STRIP_PHI[sp.k] + (sp.s - 80) / R, sp.z - 110, 45, 0.6, -0.32); };
+const atSample = key => () => {
+  const sp = landmarks.samples[key], sg = sp.s >= 0 ? 1 : -1, cs = sp.s - sg * 120, cz = sp.z - 130;
+  go(STRIP_PHI[sp.k] + cs / R, cz, 85, Math.atan2(sp.s - cs, sp.z - cz), -0.42);
+};
+// 2点のあいだから見下ろす（a の上空から b を見る）
+const lookAt = (k, as, az, bs, bz, h, pitchK = 0.85) => go(STRIP_PHI[k] + as / R, az, h, Math.atan2(bs - as, bz - az), -Math.atan2(h, Math.hypot(bs - as, bz - az)) * pitchK);
+// ターミナル駅: 縦の高架線の真上から交差点を見て、縦の線の電車を1本ホームに止める
+function terminalShot() {
+  const k = 0, ts = landmarks.terminals[k], t = ts.find(x => x.kind === 'office') || ts[0];
+  lookAt(k, 0, t.z - 330, 0, t.z, 62, 0.95);
+  const tr = vehicles.trains.find(x => !x.ring && x.dir > 0 && Math.abs(x.lane - STRIP_PHI[k]) < 0.01);
+  if (tr && tr.stops) {
+    const idS = STATIONS.axial.findIndex(z => Math.abs(z - t.z) < 1), stopU = tr.stops[idS];
+    tr.u = Math.floor(tr.u / tr.span) * tr.span + stopU - 650; tr.spd = tr.cruise; tr.wait = 0;
+    tr.decided = Math.floor(tr.u / tr.span) * 100 + idS; tr.stopHere = true;
+  }
+}
 // 1ショット = 開始位置 + 移動量（d）+ 字幕。space ショットは宇宙カメラの値を from→to で動かす
 const SHOTS = [
   { ch: 'プロローグ', t: 'L5宙域、スペースコロニー「ネオ・ミヤギ」', x: '地球と月の重力がつり合うラグランジュ点L5。直径6.4km、長さ16kmの円筒が、太陽に片側の端を向けて浮かんでいるのだ。オニール型「島3号」を手本に、2071年に建設が始まり、2089年に完成したのだ。', dur: 18,
@@ -3009,9 +3109,9 @@ const SHOTS = [
     space: { mode: 'overview', from: { az: 3.5, tilt: 1.3, dist: 60000, tz: 0 }, to: { az: 4.1, tilt: 1.35, dist: 52000, tz: 0 } } },
   { ch: 'プロローグ', t: '太陽と3枚のミラー', x: '太陽は円筒の片側の端の先にあるのだ。陸地3枚と窓3枚が交互に並び、窓の外のミラーが角度を変えて光を入れたり閉じたりすることで、中に昼と夜を作っているのだ。', dur: 15,
     space: { mode: 'overview', from: { az: 0.4, tilt: 2.6, dist: 34000, tz: -4000 }, to: { az: 0.9, tilt: 2.5, dist: 30000, tz: -3000 } } },
-  { ch: '入港', t: '宇宙港へのアプローチ', x: '太陽と反対側の端に、宇宙船の入口があるのだ。宇宙へまっすぐ伸びる赤い誘導灯の列に沿って、ぼくたちの船もゆっくり近づいていくのだ。入口が近づくと、船は噴射を絞っていくのだ。', dur: 22, fadeOut: true,
+  { ch: '入港', t: '宇宙港へのアプローチ', x: '太陽と反対側の端に、宇宙船の入口があるのだ。宇宙へまっすぐ伸びる赤い誘導灯の列に沿って、ぼくたちの船もゆっくり近づいていくのだ。入口が近づくと、船は噴射を絞っていくのだ。', dur: 22, fadeOut: true, fadeColor: '#ffffff',
     space: { mode: 'entrance', from: { az: 0.5, tilt: 2.75, dist: 2600, tz: ENTRY_Z - 9000 }, to: { az: 0.2, tilt: 3.05, dist: 500, tz: ENTRY_Z + 150 } } },
-  { ch: '入港', t: '無重力の中心軸へ', x: '入口を抜けると、そこは円筒の中心軸なのだ。軸の近くは回転の影響がほとんどなく、無重力なのだ。貨物船や旅客船、そして時速1000kmの高速電車が、両端の宇宙港のあいだを行き来しているのだ。', dur: 18, fadeIn: true,
+  { ch: '入港', t: '無重力の中心軸へ', x: '入口を抜けると、そこは円筒の中心軸なのだ。軸の近くは回転の影響がほとんどなく、無重力なのだ。貨物船や旅客船、そして時速1000kmの高速電車が、両端の宇宙港のあいだを行き来しているのだ。', dur: 18, fadeIn: true, fadeColor: '#ffffff',
     from: preset('宇宙港の出口'), d: { z: 1600, yaw: -0.1, pitch: -0.05 } },
   { ch: '円筒の内側', t: '頭上にも街がある世界', x: '見上げると、反対側の陸地が空のかわりに広がっているのだ。遠くの街ほど空気に霞んで、地面が両側からせり上がっていく――ここが円筒の中だと実感できる眺めなのだ。', dur: 16,
     from: () => go(STRIP_PHI[0], -HL + 1800, R - 700, 0, -0.25), d: { z: 1200, pitch: 0.15 } },
@@ -3022,29 +3122,29 @@ const SHOTS = [
   { ch: '街区', t: '都心のオフィス街', x: '高層ビルが立ち並ぶ都心なのだ。線路が交わるターミナル駅のまわりや、昔から栄えた場所にビルが集まっているのだ。窓の奥では今日も誰かが働いているのだ。', dur: 14,
     from: preset('都心の大通り'), d: { z: 140, h: 20 } },
   { ch: '街区', t: 'ターミナル駅', x: '横に走る環状線と、陸地の中央を縦に走る高架線が交わる場所には、必ずターミナル駅があるのだ。オフィス街に育った駅もあれば、昔ながらの住宅地のままの駅もあるのだ。', dur: 13,
-    from: preset('ターミナル駅'), d: { yaw: 0.3, z: 60 } },
+    from: terminalShot, d: { z: 160, h: -10 } },
   { ch: '街区', t: '歓楽街', x: '昼間は少し静かな歓楽街なのだ。ビルの壁には看板がびっしり、大型スクリーンには広告が流れているのだ。本番は夜――あとで戻ってくるのだ。', dur: 13,
     from: preset('★ 歓楽街'), d: { z: 120, h: -10 } },
-  { ch: '街区', t: '商店街', x: '発展しなかった駅の前には、アーケードのかかった昔ながらの商店街が残っているのだ。色とりどりの小さな店が並び、いつも人でにぎわっているのだ。', dur: 12, from: atSample('shop'), d: { z: 80, yaw: 0.2 } },
-  { ch: '街区', t: '学校', x: '住宅地のあちこちに学校があるのだ。茶色いグラウンドとプールが、上から見ると街のいい目印になるのだ。', dur: 11, from: atSample('school'), d: { z: 70, yaw: 0.2 } },
+  { ch: '街区', t: '商店街', x: '発展しなかった駅の前には、アーケードのかかった昔ながらの商店街が残っているのだ。色とりどりの小さな店が並び、いつも人でにぎわっているのだ。', dur: 12, from: () => { const p = landmarks.shopSta || landmarks.samples.shop; const sg = p.s >= 0 ? -1 : 1; lookAt(p.k, sg * 70, (p.tz ?? p.z) - 40, p.s, p.z, 60); }, d: { z: 40, h: -10 } },
   { ch: '街区', t: '寺社と鎮守の森', x: 'コロニーの人々は、地球から神様もいっしょに連れてきたのだ。朱色の鳥居と鎮守の森が、住宅地の中に静かにたたずんでいるのだ。', dur: 11, from: atSample('temple'), d: { z: 70, yaw: 0.2 } },
-  { ch: '街区', t: '団地と病院・大学', x: '同じ形の団地が並ぶ地区や、中庭を囲む病院・大学のキャンパスもあるのだ。都心と住宅地のあいだを、こうした街がなめらかにつないでいるのだ。', dur: 11, from: atSample('danchi'), d: { z: 70, yaw: 0.2 } },
   { ch: '街区', t: '工場と倉庫街', x: '窓際には、コロニーの暮らしを支える工場や倉庫が集まっているのだ。トラックが行き交う「街の裏側」なのだ。', dur: 11, from: atSample('factory'), d: { z: 70, yaw: 0.2 } },
   { ch: '街区', t: '農業区画', x: '両端の蓋の近くには、畑とガラスの温室が広がっているのだ。300万人の食べ物の多くは、このコロニーの中で育てているのだ。', dur: 12, from: atSample('farm'), d: { z: 90, yaw: 0.2 } },
-  { ch: '観光地', t: '川沿いの屋台通り', x: '陸地を縦に流れる川の岸には遊歩道があり、屋台がずらりと並ぶ一角があるのだ。提灯の下で、川風に吹かれながら食べ歩きを楽しめるのだ。', dur: 13, from: preset('川沿い'), d: { z: 150 } },
   { ch: '観光地', t: '大きな公園', x: '街のところどころにある大きな公園なのだ。鳥が群れで旋回し、木々が風に揺れているのだ。空の代わりに見えるのは、反対側の街なのだ。', dur: 12, from: preset('大きな公園'), d: { z: 100, pitch: 0.1 } },
   { ch: '観光地', t: '窓の上を渡る橋', x: '陸地と陸地のあいだにある窓は、全面ガラスなのだ。その上を渡る橋からは、足元のガラス越しに宇宙が見えるのだ。', dur: 13, from: preset('橋の上'), d: { th: 0.04, pitch: -0.3 } },
   { ch: '観光地', t: 'リング大観覧車と遊園地', x: '窓のすぐそばに立つ直径240mの大観覧車なのだ。駅を降りるとすぐ遊園地で、ジェットコースターやメリーゴーラウンドがにぎやかに動いているのだ。', dur: 14, from: preset('リング大観覧車'), d: { z: 120, yaw: 0.15 } },
   { ch: '観光地', t: '蓋をのぼるエレベーター', x: '両端の蓋には、地面から中心の宇宙港へまっすぐ上がるエレベーターが並んでいるのだ。上に行くほど体が軽くなり、終点ではふわりと浮いてしまうのだ。', dur: 13,
-    from: () => go(STRIP_PHI[0], -HL + 1300, 160, Math.PI, 0.55), d: { z: -300, h: 200 } },
+    from: () => go(STRIP_PHI[0] + 45 / R, -HL + 260, 25, Math.PI - 0.12, 0.85), d: { pitch: 0.3, h: 30 } },
   { ch: '夜', t: 'ミラーが閉じて、夜が来る', x: '夕方になると、外の3枚のミラーがゆっくり窓に閉じていくのだ。差し込む光が消えて、コロニーに夜が訪れるのだ。', dur: 16, night: 1,
     from: preset('上空 1500m'), d: { z: 900, pitch: 0.2 } },
   { ch: '夜', t: '光の筒', x: '夜のコロニーを中心軸から眺めると、窓明かりと街灯と車の光の流れが、円筒の内側をぐるりと埋め尽くすのだ。ここでしか見られない、上下左右すべてが夜景の世界なのだ。', dur: 18,
     from: () => go(STRIP_PHI[0], -HL + 2500, R - 120, 0, 0), d: { z: 2200, yaw: 0.3 } },
+  { ch: '夜', t: '夜の窓に架かる橋', x: '外のミラーは細い板をすだれのように並べた作りで、夜に閉じても板と板のすき間が残るのだ。橋の上から足元のガラスをのぞくと、そのすき間から本物の星空が見えるのだ。', dur: 15,
+    from: () => go(WIN_PHI[0] - 0.05, BRIDGE_Z[6] + 11, 6, 0.35, -0.55), d: { th: 0.04, pitch: -0.15 } },
   { ch: '夜', t: '目を覚ます歓楽街', x: '昼間は静かだった歓楽街が、夜になると一気に目を覚ますのだ。ネオン看板と広告スクリーンが道路まで色とりどりに染めるのだ。', dur: 15, from: preset('★ 歓楽街'), d: { z: 160, h: -12 } },
-  { ch: '夜', t: '提灯の灯る川辺', x: '屋台通りでは提灯がともり、水面に光が揺れているのだ。', dur: 12, from: preset('川沿い'), d: { z: 150 } },
+  { ch: '夜', t: '提灯の灯る川辺の屋台通り', x: '陸地を流れる川の岸には遊歩道があり、夜になると屋台がずらりと並ぶのだ。提灯の下で、水面に揺れる光を眺めながら食べ歩きを楽しめるのだ。', dur: 15,
+    from: () => go(STRIP_PHI[RIVERSIDE.k] + (sCenter(RIVER_I[RIVERSIDE.k]) + 51) / R, zCenter(RIVERSIDE.j0) - 40, 12, -0.12, 0.05), d: { z: 520 } },
   { ch: '夜', t: '夜の中央駅', x: '夜の中央駅は、ネオンの塊から光るエレベーターが放射状に伸びる、まるで巨大な灯台なのだ。', dur: 14, from: preset('中心軸の駅（見上げる）'), d: { yaw: 0.3 } },
-  { ch: '夜', t: '虹色の観覧車', x: '観覧車の外周には虹色の光が流れ、遊園地の夜はまだまだ終わらないのだ。', dur: 13, from: preset('リング大観覧車'), d: { z: 120, yaw: 0.15 } },
+  { ch: '夜', t: '虹色の観覧車', x: '観覧車の外周とジェットコースターのレールに虹色の光が流れ、遊園地の夜はまだまだ終わらないのだ。', dur: 13, from: preset('リング大観覧車'), d: { z: 120, yaw: 0.15 } },
   { ch: '夜', t: 'ライトアップされた公園', x: '公園では、暖かな光が木々を足元から照らしているのだ。頭上には反対側の街の灯りが、星空のかわりに広がっているのだ。', dur: 13, from: preset('大きな公園'), d: { z: 100, pitch: 0.15 } },
   { ch: 'エピローグ', t: 'また朝が来る', x: 'やがてミラーが開き、コロニーにまた朝が来るのだ。宇宙に浮かぶ小さな故郷、ネオ・ミヤギへようこそ。――ガイドはずんだもんでした。', dur: 20, night: 0, fadeIn: true, fadeOut: true,
     space: { mode: 'overview', from: { az: 1.6, tilt: 1.2, dist: 22000, tz: -1000 }, to: { az: 0.5, tilt: 1.05, dist: 34000, tz: -2000 } } },
@@ -3128,8 +3228,11 @@ function demoStartShot(i) {
   const token = demo.token = (demo.token || 0) + 1;     // 送り・戻しを連打したとき、古い字幕が遅れて出ないように
   setTimeout(() => { if (token !== demo.token) return; c.querySelector('.ch').textContent = sh.ch; c.querySelector('h2').textContent = sh.t; c.querySelector('p').textContent = sh.x; c.style.opacity = 1; }, 600);
   el('demo-pos').textContent = `ガイドツアー ${i + 1} / ${SHOTS.length}`;
+  const white = sh.fadeColor === '#ffffff';
+  demoEl.fade.style.transition = 'none'; demoEl.fade.style.background = sh.fadeIn ? (sh.fadeColor || '#000') : '#000';
   demoEl.fade.style.opacity = sh.fadeIn || i === 0 ? 1 : 0;
-  if (sh.fadeIn || i === 0) setTimeout(() => { if (token === demo.token) demoEl.fade.style.opacity = 0; }, 400);
+  void demoEl.fade.offsetWidth; demoEl.fade.style.transition = `opacity ${white ? 2.2 : 0.8}s`;
+  if (sh.fadeIn || i === 0) setTimeout(() => { if (token === demo.token) demoEl.fade.style.opacity = 0; }, white ? 700 : 400);
 }
 function updateDemo(dt) {
   if (!demo.on || demo.paused) return;
@@ -3142,7 +3245,8 @@ function updateDemo(dt) {
     player.th = s0.th + (d.th || 0) * u; player.z = s0.z + (d.z || 0) * u; player.h = s0.h + (d.h || 0) * u;
     player.yaw = s0.yaw + (d.yaw || 0) * u; player.pitch = s0.pitch + (d.pitch || 0) * u;
   }
-  if (sh.fadeOut && demo.t > sh.dur - 1.0) demoEl.fade.style.opacity = 1;
+  const fadeLen = sh.fadeColor === '#ffffff' ? 2.4 : 1.0;
+  if (sh.fadeOut && demo.t > sh.dur - fadeLen && demoEl.fade.style.opacity !== '1') { demoEl.fade.style.background = sh.fadeColor || '#000'; demoEl.fade.style.transition = `opacity ${fadeLen - 0.2}s`; demoEl.fade.style.opacity = 1; }
   if (demo.t > sh.dur - 0.6) demoEl.cap.style.opacity = 0;
   if (demo.t >= sh.dur) demoStartShot((demo.i + 1) % SHOTS.length);
 }
@@ -3217,7 +3321,7 @@ setTimeout(() => {
   drawMinimapBase();
   PRESETS[0][1]();
   el('loading').classList.add('hidden');
-  window.__ready = true; window.__demo = demo; window.__startDemo = startDemo; window.__demoShot = demoStartShot; window.__player = player; window.__ships = ships; window.__trains = vehicles.trains; window.__night = toggleNight; window.__space = space; window.__toggleSpace = toggleSpace; window.__viewEntrance = viewEntrance; window.__extShips = extShips; window.__post = post; window.__t = () => elapsed; window.__scene = scene; window.__axis = () => axisCarMesh;
+  window.__ready = true; window.__demo = demo; window.__startDemo = startDemo; window.__demoShot = demoStartShot; window.__lm = landmarks; window.__player = player; window.__ships = ships; window.__trains = vehicles.trains; window.__night = toggleNight; window.__space = space; window.__toggleSpace = toggleSpace; window.__viewEntrance = viewEntrance; window.__extShips = extShips; window.__post = post; window.__t = () => elapsed; window.__scene = scene; window.__axis = () => axisCarMesh;
   frame();
   if (new URLSearchParams(location.search).has('demo')) startDemo();
 }, 30);
