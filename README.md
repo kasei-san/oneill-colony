@@ -13,7 +13,7 @@ python3 -m http.server 8917
 ```
 
 ブラウザで http://localhost:8917/ を開く（Three.js r170 を CDN から読み込むのでネット接続が必要）。
-重いときは `?q=low`、ガイドツアーから始めるときは `?demo`、スマホ縦長の約1分のダイジェストは `?sns` を付ける（どちらもクリックで開始。ブラウザがクリック前に音を出させないため）。縦長の画面で開くと自動で `?sns` の表示になる（`?pc` で通常表示）。
+重いときは `?q=low`、ガイドツアーから始めるときは `?demo`、スマホ縦長の約1分のダイジェストは `?sns` を付ける（どちらもクリックで開始。ブラウザがクリック前に音を出させないため）。縦長の画面で開くと自動で `?sns` と同じ縦長ダイジェストの開始画面になる（`?pc` で通常表示）。
 コロニーの歴史は http://localhost:8917/history.html で読める。
 
 ## 操作
@@ -66,5 +66,5 @@ node check.mjs /tmp/oneill-check --presets 0,1,6 --input     # 昼。ワープ�
 node check.mjs /tmp/oneill-check --presets 3,4,6 --night     # 夜
 node tour-shots.mjs /tmp/tour '[["旧市街",3000],["ターミナル駅",3000]]'   # ガイドツアーの場面を見出しで指定して撮る（--night で夜）
 node tour-loop.mjs                                            # ガイドツアーが全場面進んでループするか
-node record-sns.mjs ../out/oneill-colony-sns.mp4             # SNS 用の縦長動画（1080x1920・30fps・BGM付き・15場面77秒）を書き出す（約2分）
+node record-sns.mjs ../out/oneill-colony-sns.mp4             # SNS 用の縦長動画（1080x1920・30fps・BGM付き・15場面77秒）を書き出す（書き出しに約2分かかる）
 ```
