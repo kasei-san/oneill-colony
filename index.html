@@ -1023,7 +1023,7 @@ const ZG_Z = 2500;                                    // 無重力パークの�
 const HUB_Z = -500;
 const HUB_SPOKES = [];
 for (let k = 0; k < 3; k++) for (const d of [-0.25, 0.25]) HUB_SPOKES.push(STRIP_PHI[k] + d);   // 陸地ごとに2本、計6本
-let hubCabMesh, hubNeonMat;
+let hubCabMesh, hubNeonMat, hubWarn, hubWarnMat;
 function buildHubStation() {
   // 巣: 内側は軸の電車が通るので空け（半径80m〜240m）、外ほど低く・端ほど細る塊
   const cells = [], pipes = [];
@@ -1056,6 +1056,12 @@ function buildHubStation() {
   scene.add(instanced(GEO.box, trussM, posts, 6, { color: false, cast: false }));
   scene.add(instanced(GEO.box, trussM, braces, 6, { color: false, cast: false }));
   scene.add(instanced(GEO.box, M.bld, bases, 7, { cast: false }));
+  // 赤い警告灯（スポークの4隅の柱に150mおき。昼夜とわず点滅）
+  const warn = [];
+  for (const th of HUB_SPOKES) for (let h = 40; h < R - 240; h += 150) for (const [ds, dz] of [[-10, -10], [10, 10]]) warn.push(th + ds / R, HUB_Z + dz, h, 6, 6, 6);
+  hubWarnMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(9, 0.25, 0.15), fog: false }); // 霞に負けず昼も見える
+  hubWarn = instanced(new THREE.SphereGeometry(0.5, 8, 6), hubWarnMat, warn, 6, { color: false, cast: false });
+  scene.add(hubWarn);
   // かご（各スポークに上り下り2台ずつ）
   hubCabMesh = new THREE.InstancedMesh(GEO.box, patch(new THREE.MeshStandardMaterial({ color: 0xf2f4f6, roughness: 0.3, metalness: 0.3, emissive: 0xffc8f0, emissiveIntensity: 0.6 })), HUB_SPOKES.length * 2);
   hubCabMesh.frustumCulled = false;
@@ -1107,12 +1113,27 @@ function updateHubStation(t) {
     }
   });
   hubCabMesh.instanceMatrix.needsUpdate = true;
+  hubWarn.visible = (t % 1.6) < 0.7;                     // 警告灯の点滅
   const n = U.uNight.value, flick = 0.92 + 0.08 * Math.sin(t * 31) * Math.sin(t * 7.3);
   hubNeonMat.color.setScalar((3.5 + 3.5 * n) * flick);
 }
 const LM = {};
 function frameAt(th) {                                // 円筒上の局所フレーム（x=東, y=上, z=北）の回転行列
   return new THREE.Matrix4().makeBasis(new THREE.Vector3(-Math.sin(th), Math.cos(th), 0), new THREE.Vector3(-Math.cos(th), -Math.sin(th), 0), new THREE.Vector3(0, 0, 1));
+}
+// 軸の電車のホーム（各線路の両わきに細い床と、手すりの光の帯）
+function addAxisPlatforms(zc, col) {
+  const recs = [], lights = [];
+  for (let n = 0; n < 4; n++) {
+    const a = AXIS_TRACK_A0 + n * TAU / 4;
+    for (const side of [-1, 1]) {
+      const ta = a + side * 14 / 52;
+      recs.push(ta, zc, R - 54, 8, 2, 380, col);
+      lights.push(ta + side * 3.5 / 52, zc, R - 56, 0.5, 0.5, 380);
+    }
+  }
+  scene.add(instanced(GEO.box, patch(new THREE.MeshStandardMaterial({ roughness: 0.5 })), recs, 7, { cast: false }));
+  scene.add(instanced(GEO.box, new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 1.8, 2.2) }), lights, 6, { color: false, cast: false }));
 }
 function buildLandmarks() {
   // --- 1. 無重力パーク: 中心軸を包む直径500mのガラス球。中に浮島・水の玉・漂う人
@@ -1167,6 +1188,20 @@ function buildLandmarks() {
     g.add(LM.zgPeople);
     scene.add(g);
   }
+  // --- 無重力パーク駅: 軸の電車のホームを、白いリングフレームとガラスの筒で包んだ静かな駅
+  {
+    const g = new THREE.Group(); g.position.z = ZG_Z;
+    const white = patch(new THREE.MeshStandardMaterial({ color: 0xf2f4f6, roughness: 0.35, metalness: 0.2 }));
+    for (let z = -110; z <= 110; z += 22) g.add(new THREE.Mesh(new THREE.TorusGeometry(78, 1.6, 8, 64).translate(0, 0, z), white));
+    for (let i = 0; i < 8; i++) { const a = i / 8 * TAU + TAU / 16; const b = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 224), white); b.position.set(Math.cos(a) * 78, Math.sin(a) * 78, 0); g.add(b); }
+    g.add(new THREE.Mesh(new THREE.CylinderGeometry(78, 78, 224, 48, 1, true).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xcfe8ff, transparent: true, opacity: 0.12, depthWrite: false, side: THREE.DoubleSide })));
+    LM.zgStLight = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.2, 1.4, 1.6) });
+    for (const z of [-112, 112]) g.add(new THREE.Mesh(new THREE.TorusGeometry(78, 2.4, 6, 64).translate(0, 0, z), LM.zgStLight));
+    scene.add(g);
+    addAxisPlatforms(ZG_Z, 0xf2f4f6);
+  }
+  addAxisPlatforms(HUB_Z, 0x9aa0a8);
+
   // --- 3. リング大観覧車: 窓の上の橋のわきに立つ直径240mの観覧車。てっぺんから足元のガラス越しに宇宙が見える
   {
     const zb = BRIDGE_Z[3], th = STRIP_PHI[1] + 1460 / R, zw = zb + 230;
@@ -1656,11 +1691,34 @@ function buildAxisTrains() {
   axisStripeMesh.frustumCulled = false;
   scene.add(axisCarMesh, axisStripeMesh);
 }
+// 軸の電車の時刻表: 駅の手前 D m で減速して止まり、DWELL 秒停車してから加速する（1周＝端から端で折り返し）
+const AX_D = 900, AX_DWELL = 12;
+function axisLapTime(span, v, n) { return span / v + n * (2 * AX_D / v + AX_DWELL); }  // 減速・加速区間は平均速度 v/2
+function axisLapPos(tau, stops, span, v) {
+  let x = 0, tt = tau;
+  for (const p of stops) {
+    const cruise = (p - AX_D - x) / v;
+    if (tt < cruise) return x + v * tt;
+    tt -= cruise; x = p - AX_D;
+    const T = 2 * AX_D / v;
+    if (tt < T) { const u = tt / T; return x + AX_D * (2 * u - u * u); }   // 減速
+    tt -= T; x = p;
+    if (tt < AX_DWELL) return x;                                            // 停車
+    tt -= AX_DWELL;
+    if (tt < T) { const u = tt / T; return x + AX_D * u * u; }              // 加速
+    tt -= T; x = p + AX_D;
+  }
+  return Math.min(span, x + v * tt);
+}
 function updateAxisTrains(t) {
-  const a = axisCarMesh.instanceMatrix.array, span = 2 * (HL - 150);
+  const a = axisCarMesh.instanceMatrix.array, span = 2 * (HL - 150), z0 = -(HL - 150);
   axisTrains.forEach((tr, i) => {
+    const stops = [HUB_Z, ZG_Z].map(Z => tr.dir > 0 ? Z - z0 + 168 : -Z - z0 + 168).sort((p, q) => p - q); // 停車位置（編成の中央がホームに来るよう先頭をずらす）
+    const lapT = axisLapTime(span, tr.v, stops.length);
+    const x = axisLapPos(((tr.ph * lapT + t) % lapT + lapT) % lapT, stops, span, tr.v);
     for (let c = 0; c < 8; c++) {
-      const z = -(HL - 150) + ((((tr.ph * span + tr.v * tr.dir * t - tr.dir * c * 42) % span) + span) % span);
+      const xc = ((x - c * 42) % span + span) % span;
+      const z = tr.dir > 0 ? z0 + xc : -z0 - xc;
       writeBox(a, (i * 8 + c) * 16, tr.a, z, R - 50.5, 10, 8, 40); // レールの上（軸から約50m）
     }
   });
@@ -2429,6 +2487,7 @@ const PRESETS = [
   ['中心軸のそば（無重力帯）', () => go(STRIP_PHI[0], -HL + 1200, R - 80, 0, 0)],
   ['★ 中心軸の駅（見上げる）', () => go(STRIP_PHI[0] + 0.25, HUB_Z - 700, 120, 0, 1.0)],
   ['★ 中心軸の駅（間近）', () => go(STRIP_PHI[0] + 0.62, HUB_Z - 750, R - 520, 0.35, 0.42)],
+  ['★ 無重力パーク駅（電車が止まる）', () => go(STRIP_PHI[0] + 0.45, ZG_Z - 330, R - 130, 0.15, 0.25)],
   ['★ 無重力パーク（中心軸）', () => go(STRIP_PHI[0], ZG_Z - 600, R - 330, 0, 0.45)],
   ['★ リング大観覧車と遊園地', () => go(STRIP_PHI[1] + 1150 / R, BRIDGE_Z[3] - 380, 45, 0.55, 0.2)],
   ['宇宙港の出口（船の航路）', () => go(STRIP_PHI[0] + 0.2, -HL + 450, R - 360, 0.1, 0.12)],
