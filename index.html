@@ -786,6 +786,47 @@ function build() {
     scene.add(new THREE.Mesh(geo, patch(new THREE.MeshStandardMaterial({ map: tex, roughness: 1 }))));
   }
 
+  // 両端の山: 陸地の延長として外周から軸方向へせり上がる。窓側の端と内側の縁では低くなる（谷・尾根になる）
+  const capTrees = [];
+  const mtnMat = patch(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, side: THREE.DoubleSide }));
+  for (const zc of [-HL, HL]) {
+    const sg = zc > 0 ? -1 : 1;                       // 内側（コロニー中央）へ向かう向き
+    for (let k = 0; k < 3; k++) {
+      const a0 = STRIP_PHI[k] - SECTOR / 2, nA = 60, nR = 40, rIn = 0.42 * R;
+      const pos = [], col = [], idx = [];
+      const height = (a, r) => {
+        const hr = (R - r) / (R - rIn), edge = Math.min(a - a0, a0 + SECTOR - a);
+        const taper = THREE.MathUtils.smoothstep(edge, 0, 0.16) * (1 - THREE.MathUtils.smoothstep(hr, 0.82, 1.0));
+        const ridge = 1 + 0.18 * Math.sin(a * 23 + hr * 7 + k) * Math.sin(hr * 11 + k * 2) + 0.08 * Math.sin(a * 61 + hr * 19);
+        let h = 1300 * Math.pow(hr, 1.1) * ridge * taper;
+        if (h < 650) { const t = 45; h = Math.floor(h / t) * t + t * THREE.MathUtils.smoothstep(h / t % 1, 0.7, 1.0); } // 段々畑
+        return h;
+      };
+      for (let ir = 0; ir <= nR; ir++) {
+        const r = R - (R - rIn) * ir / nR;
+        for (let ia = 0; ia <= nA; ia++) {
+          const a = a0 + SECTOR * ia / nA, h = height(a, r);
+          pos.push(r * Math.cos(a), r * Math.sin(a), zc + sg * h);
+          const band = Math.floor(h / 45) % 2;
+          const c = h > 1050 ? [0.82, 0.83, 0.85] : h > 700 ? [0.42, 0.4, 0.37] : h > 380 ? [0.2, 0.33, 0.18] : band ? [0.42, 0.56, 0.28] : [0.5, 0.62, 0.32];
+          col.push(...c);
+          if (h > 120 && h < 680 && rand() < 0.5) capTrees.push(a + rr(-0.004, 0.004), zc + sg * h, R - r, 9, 12, 9, pick(PAL.tree));
+        }
+      }
+      for (let ir = 0; ir < nR; ir++) for (let ia = 0; ia < nA; ia++) {
+        const a = ir * (nA + 1) + ia, b = a + 1, c = a + nA + 1, d = c + 1;
+        idx.push(a, b, c, b, d, c);
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+      g.setIndex(idx); g.computeVertexNormals();
+      const m = new THREE.Mesh(g, mtnMat); m.receiveShadow = true;
+      scene.add(m);
+    }
+  }
+  scene.add(instanced(GEO.tree, M.tree, capTrees, 7, { cast: false }));
+
   // 中心軸の構造物
   const spine = new THREE.Mesh(new THREE.CylinderGeometry(14, 14, L, 16, 1, true).rotateX(Math.PI / 2), M.steel);
   scene.add(spine);
@@ -1328,23 +1369,61 @@ function buildShips() {
       grp.add(new THREE.Mesh(new THREE.BoxGeometry(sw, 0.8, sl).translate(0, -sy, 0), new THREE.MeshBasicMaterial({ color: new THREE.Color(col).multiplyScalar(4) })));
     }
     const navs = k.nav.map((p, j) => { const m = new THREE.Mesh(navGeo, navMat[j]); m.position.set(...p); m.scale.setScalar(k.len > 100 ? 2.2 : 0.8); grp.add(m); return m; });
-    const a = rand() * TAU, r = rr(...k.lane), stop = HL - 240 - k.len / 2;
+    const a = rand() * TAU, r = rr(...k.lane), stop = HL - 400 - k.len / 2;
     scene.add(grp);
     ships.push({ grp, navs, x: r * Math.cos(a), y: r * Math.sin(a), roll: a, stop, v: rr(...k.speed), dwell: rr(8, 20), phase: rand() * 1000, dir: rand() < 0.5 ? 1 : -1 });
   }
 
-  // 両端の宇宙港（軸上のハブ）
+  // 両端の宇宙港: 本体・発着口・蓋につながる支柱・回転する居住リング・標識灯
+  const hubMat = patch(new THREE.MeshStandardMaterial({ color: 0xb4bac3, roughness: 0.45, metalness: 0.45 }));
+  const bayMat = new THREE.MeshBasicMaterial({ color: 0x05070b });
+  const frameMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(4, 3.2, 1.8) });
+  const beaconMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(9, 0.6, 0.3) });
   for (const sg of [-1, 1]) {
-    const hub = new THREE.Mesh(new THREE.CylinderGeometry(330, 420, 200, 32).rotateX(Math.PI / 2).translate(0, 0, sg * (HL - 100)), M.steel);
-    scene.add(hub);
-    const lights = [];
-    for (let i = 0; i < 24; i++) { const a = i / 24 * TAU; lights.push(Math.cos(a) * 335, Math.sin(a) * 335, sg * (HL - 202)); }
-    const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute(lights, 3));
-    scene.add(new THREE.Points(lg, new THREE.PointsMaterial({ color: new THREE.Color(6, 5, 3), size: 6, sizeAttenuation: false })));
+    const zf = sg * (HL - 320);                                   // 港の正面（コロニー中央向き）
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(430, 480, 320, 48).rotateX(Math.PI / 2).translate(0, 0, sg * (HL - 160)), hubMat);
+    const nose = new THREE.Mesh(new THREE.CylinderGeometry(150, 430, 60, 48).rotateX(sg * Math.PI / 2).translate(0, 0, zf - sg * 30), hubMat);
+    scene.add(body, nose);
+    // 発着口 12 個（暗い開口と光る枠）
+    const bays = [], frames = [], greeb = [];
+    for (let i = 0; i < 12; i++) {
+      const a = (i + 0.5) / 12 * TAU, r = 300;
+      bays.push(a, zf - sg * 1.5, R - (r + 22), 58, 44, 3);
+      for (const [dr, w, hgt] of [[0, 62, 2.5], [44, 62, 2.5]]) frames.push(a, zf - sg * 2.5, R - (r + 22) - dr + 1.2, w, hgt, 1.5);
+      for (const ds of [-30, 30]) frames.push(a + ds / r, zf - sg * 2.5, R - (r + 22), 2.5, 44, 1.5);
+    }
+    // 表面の細かい凹凸（グリーブル）
+    for (let i = 0; i < 260; i++) { const a = rand() * TAU, r = rr(160, 470); greeb.push(a, zf - sg * rr(1, 6), R - r, rr(6, 26), rr(3, 14), rr(6, 26)); }
+    for (let i = 0; i < 160; i++) { const a = rand() * TAU; greeb.push(a, sg * (HL - rr(30, 300)), R - 482, rr(8, 30), rr(3, 10), rr(10, 40)); }
+    scene.add(instanced(GEO.box, bayMat, bays, 6, { color: false, cast: false }));
+    scene.add(instanced(GEO.box, frameMat, frames, 6, { color: false, cast: false }));
+    scene.add(instanced(GEO.box, hubMat, greeb, 6, { color: false, cast: false }));
+    // 蓋の面につながる支柱 8 本
+    const py = [];
+    for (let i = 0; i < 8; i++) py.push(i / 8 * TAU, sg * (HL - 45), R - 1150, 36, 680, 70);
+    scene.add(instanced(GEO.box, hubMat, py, 6, { color: false, cast: false }));
+    // ゆっくり回る居住リング（スポーク付き）
+    const ring = new THREE.Group();
+    ring.add(new THREE.Mesh(new THREE.TorusGeometry(760, 24, 12, 128), hubMat));
+    ring.add(new THREE.Mesh(new THREE.TorusGeometry(760, 25.5, 4, 128, TAU).scale(1, 1, 0.12), new THREE.MeshBasicMaterial({ color: new THREE.Color(3.5, 3, 2.2) })));
+    for (let i = 0; i < 6; i++) ring.add(new THREE.Mesh(new THREE.BoxGeometry(290, 12, 12).translate(615, 0, 0).rotateZ(i / 6 * TAU), hubMat));
+    ring.position.z = sg * (HL - 200);              // 本体のまわりを回る
+    scene.add(ring);
+    hubRings.push(ring);
+    // 正面の縁で点滅する標識灯
+    for (let i = 0; i < 8; i++) {
+      const b = new THREE.Mesh(new THREE.SphereGeometry(5, 8, 6), beaconMat);
+      const a = i / 8 * TAU; b.position.set(Math.cos(a) * 440, Math.sin(a) * 440, zf - sg * 4);
+      scene.add(b); hubBeacons.push(b);
+    }
   }
 }
+const hubRings = [], hubBeacons = [];
 
 function updateShips(t) {
+  for (const r of hubRings) r.rotation.z = t * 0.03;
+  const on = (t % 1.6) < 0.25;
+  for (const b of hubBeacons) b.visible = on;
   for (const s of ships) {
     const T = (2 * s.stop) / s.v * 1.3, cyc = T + s.dwell;   // 加減速ぶん1.3倍
     const local = (t + s.phase) % (2 * cyc), leg = local < cyc ? 0 : 1, tt = local - leg * cyc;
