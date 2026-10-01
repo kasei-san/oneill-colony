@@ -1120,6 +1120,18 @@ function build() {
         for (const dz of [-8, 8]) misc.push(a, zb + dz, -(GLASS_R - R), 1.2, GLASS_R - R - 2.5, 1.2);
     }
   }
+  // 高架の上の線路: 電車の走る位置（環状線は z±2m、陸地中央の高架線は s±2m）にレール2本と枕木
+  const rails = new GeoBuilder(), ties = [];
+  for (const zb of BRIDGE_Z) for (const tz of [-2, 2]) for (const dz of [-0.75, 0.75]) rails.ringBand(R - 16.18, R - 16, zb + tz + dz - 0.08, zb + tz + dz + 0.08, 0, TAU, 360);
+  for (const zb of BRIDGE_Z) for (let a = 0; a < TAU; a += 2.5 / (R - 16)) for (const tz of [-2, 2]) ties.push(a, zb + tz, 16, 0.25, 0.1, 2.3);
+  for (let k = 0; k < 3; k++) for (const ts of [-2, 2]) {
+    const th = STRIP_PHI[k] + ts / R;
+    for (const ds of [-0.75, 0.75]) misc.push(th + ds / R, 0, 8, 0.16, 0.18, L - 60);           // 軸方向のレール
+    for (let z = -HL + 30; z < HL - 30; z += 2.5) ties.push(th, z, 8, 2.3, 0.1, 0.25);
+  }
+  const railMesh = new THREE.Mesh(rails.geo(), M.steel);
+  const tieMesh = instanced(GEO.box, patch(new THREE.MeshStandardMaterial({ color: 0x5a4a3c, roughness: 0.9 })), ties, 6, { color: false, cast: false });
+  scene.add(railMesh, tieMesh);
   const concMesh = new THREE.Mesh(conc.geo(), M.concrete); concMesh.receiveShadow = concMesh.castShadow = true;
   const deckMesh = new THREE.Mesh(deck.geo(), M.deck); deckMesh.receiveShadow = deckMesh.castShadow = true;
   const miscMesh = instanced(GEO.box, M.concrete, misc, 6, { color: false });
