@@ -126,7 +126,7 @@ const ANISO = renderer.capabilities.getMaxAnisotropy();
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
 scene.fog = new THREE.FogExp2(new THREE.Color(0xbcd0e8), 3.3e-4); // 密度は colonyFog の「地表換算距離」に掛ける係数
-const camera = new THREE.PerspectiveCamera(80, innerWidth / innerHeight, 0.5, 400000); // 遠くの僚コロニーまで描くため遠め
+const camera = new THREE.PerspectiveCamera(80, innerWidth / innerHeight, 0.5, 600000); // 遠くの僚コロニーまで描くため遠め
 
 // ===== 照明: 各陸地は「向かいの窓」から鏡で反射した太陽光を受ける =====
 const sunL = STRIP_PHI.map(p => new THREE.Vector3(-Math.cos(p), -Math.sin(p), 0)
@@ -1881,7 +1881,8 @@ function buildExterior() {
     const mirBackM = new THREE.MeshBasicMaterial({ color: 0x3c4148, side: THREE.BackSide });             // 裏側: 反射しない板
     const hullG = new THREE.CylinderGeometry(GLASS_R, GLASS_R, L, 48, 1, true).rotateX(Math.PI / 2);
     const capG = new THREE.CircleGeometry(GLASS_R, 48);
-    const spots = [[-62000, 38000, 15000], [88000, -21000, -42000], [-30000, -96000, 30000], [140000, 70000, 60000], [-150000, 20000, -90000]];
+    // 自分のコロニーを含めて6基が輪になるよう、半径80kmの円周上（60°おき、自分は 0°）に並べる。前後に少しずらす
+    const spots = [1, 2, 3, 4, 5].map(n => { const a = n * TAU / 6; return [80000 * Math.cos(a) - 80000, 80000 * Math.sin(a), [8000, -12000, 4000, -6000, 10000][n - 1]]; });
     for (const [x, y, z] of spots) {
       const g = new THREE.Group();
       g.add(new THREE.Mesh(hullG, hullM));
@@ -1985,15 +1986,15 @@ function updateSpace(t) {
   }
 }
 function updateSpaceCamera() {
-  const p = new THREE.Vector3(Math.sin(space.tilt) * Math.cos(space.az), Math.sin(space.tilt) * Math.sin(space.az), Math.cos(space.tilt)).multiplyScalar(space.dist).add(new THREE.Vector3(0, 0, space.tz));
+  const p = new THREE.Vector3(Math.sin(space.tilt) * Math.cos(space.az), Math.sin(space.tilt) * Math.sin(space.az), Math.cos(space.tilt)).multiplyScalar(space.dist).add(space.target ? new THREE.Vector3(...space.target) : new THREE.Vector3(0, 0, space.tz));
   spaceFrame.updateMatrixWorld();
   camera.position.copy(spaceFrame.localToWorld(p));
   camera.up.set(0, 0, 1);
-  camera.lookAt(0, 0, space.tz);
+  if (space.target) { const tg = spaceFrame.localToWorld(new THREE.Vector3(...space.target)); camera.lookAt(tg); } else camera.lookAt(0, 0, space.tz);
 }
 const setSpaceDOF = on => { if (post.dofQuad) post.dofQuad.material.uniforms.uFocusCap.value = on ? Math.max(space.dist, 1001) : 150; };
-function toggleSpace() { space.on = !space.on; if (space.on) Object.assign(space, { mode: 'overview', az: 0.6, tilt: 1.0, dist: 30000, tz: -2000 }); /* 太陽側の斜め上から（ミラーの鏡面が見える） */ setSpaceDOF(space.on); envTimer = 99; }
-function viewEntrance() { space.on = true; Object.assign(space, { mode: 'entrance', az: 0.9, tilt: 2.45, dist: 3200, tz: ENTRY_Z - 1800 }); setSpaceDOF(true); envTimer = 99; }
+function toggleSpace() { space.on = !space.on; space.target = null; if (space.on) Object.assign(space, { mode: 'overview', az: 0.6, tilt: 1.0, dist: 30000, tz: -2000 }); /* 太陽側の斜め上から（ミラーの鏡面が見える） */ setSpaceDOF(space.on); envTimer = 99; }
+function viewEntrance() { space.on = true; space.target = null; Object.assign(space, { mode: 'entrance', az: 0.9, tilt: 2.45, dist: 3200, tz: ENTRY_Z - 1800 }); setSpaceDOF(true); envTimer = 99; }
 function leaveSpace() { if (space.on) { space.on = false; setSpaceDOF(false); envTimer = 99; } }
 addEventListener('wheel', e => { if (space.on) space.dist = THREE.MathUtils.clamp(space.dist * Math.exp(e.deltaY * 0.001), 3000, 90000); }, { passive: true });
 
@@ -3133,7 +3134,7 @@ const SHOTS = [
   { ch: 'プロローグ', t: '110秒で1回転する大地', x: 'コロニーは約110秒に1回転しているのだ。内側の地面では、この回転の遠心力がちょうど地球と同じ1Gの重さを生むのだ。中に住む約300万人にとって、円筒の内側が「地面」なのだ。', dur: 15,
     space: { mode: 'overview', from: { az: 1.2, tilt: 1.15, dist: 26000, tz: -1000 }, to: { az: 2.0, tilt: 1.4, dist: 22000, tz: 0 } } },
   { ch: 'プロローグ', t: '6基の兄弟コロニー', x: 'L5宙域には同じ型のコロニーが6基並んでいるのだ。どれも軸を太陽に向けて回り続け、外側の3枚の巨大なミラーで太陽の光を窓から中へ送り込んでいるのだ。', dur: 15,
-    space: { mode: 'overview', from: { az: 3.5, tilt: 1.3, dist: 60000, tz: 0 }, to: { az: 4.1, tilt: 1.35, dist: 52000, tz: 0 } } },
+    space: { mode: 'overview', from: { az: 0.15, tilt: 0.55, dist: 200000, tz: 0 }, to: { az: 0.35, tilt: 0.6, dist: 185000, tz: 0 }, target: [-80000, 0, 0] } },
   { ch: 'プロローグ', t: '太陽と3枚のミラー', x: '太陽は円筒の片側の端の先にあるのだ。陸地3枚と窓3枚が交互に並び、窓の外のミラーが角度を変えて光を入れたり閉じたりすることで、中に昼と夜を作っているのだ。', dur: 15,
     space: { mode: 'overview', from: { az: 0.4, tilt: 2.6, dist: 34000, tz: -4000 }, to: { az: 0.9, tilt: 2.5, dist: 30000, tz: -3000 } } },
   { ch: '入港', t: '宇宙港へのアプローチ', x: '太陽と反対側の端に、宇宙船の入口があるのだ。宇宙へまっすぐ伸びる赤い誘導灯の列に沿って、ぼくたちの船もゆっくり近づいていくのだ。入口が近づくと、船は噴射を絞っていくのだ。', dur: 22, fadeOut: true, fadeColor: '#ffffff',
@@ -3249,9 +3250,9 @@ function demoStartShot(i) {
   demo.i = i; demo.t = 0;
   if (sh.night !== undefined && dayNight.target !== sh.night) { dayNight.target = sh.night; dayNight.applied = false; }
   if (sh.space) {
-    space.on = true; space.mode = sh.space.mode; Object.assign(space, sh.space.from); setSpaceDOF(true); envTimer = 99;
+    space.on = true; space.mode = sh.space.mode; space.target = sh.space.target || null; Object.assign(space, sh.space.from); setSpaceDOF(true); envTimer = 99;
   } else {
-    sh.from(); demo.start = { ...player };
+    space.target = null; sh.from(); demo.start = { ...player };
   }
   const c = demoEl.cap; c.style.opacity = 0;
   const token = demo.token = (demo.token || 0) + 1;     // 送り・戻しを連打したとき、古い字幕が遅れて出ないように
