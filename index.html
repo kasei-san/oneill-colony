@@ -828,15 +828,16 @@ function build() {
   const mirrorMat = new THREE.MeshBasicMaterial({ map: mirrorTex, side: THREE.BackSide, fog: false, depthWrite: false }); // 窓に向いた鏡面
   // 太陽（+z の彼方）の光が鏡で反射してカメラに届く向きだと強く光る
   mirrorMat.onBeforeCompile = sh => {
-    sh.uniforms.uMirrorSun = mirrorSun;
+    sh.uniforms.uMirrorSun = mirrorSun; sh.uniforms.uMirrorSpace = mirrorSpace;
     sh.vertexShader = 'varying vec3 vMW; varying vec3 vMN;\n' + sh.vertexShader.replace('#include <project_vertex>',
       '#include <project_vertex>\n vMW = (modelMatrix * vec4(transformed, 1.0)).xyz; vMN = -normalize(mat3(modelMatrix) * normal);');
-    sh.fragmentShader = 'varying vec3 vMW; varying vec3 vMN; uniform float uMirrorSun;\n' + sh.fragmentShader.replace('#include <opaque_fragment>', `{
+    sh.fragmentShader = 'varying vec3 vMW; varying vec3 vMN; uniform float uMirrorSun; uniform float uMirrorSpace;\n' + sh.fragmentShader.replace('#include <opaque_fragment>', `{
         vec3 r = reflect(vec3(0.0, 0.0, -1.0), normalize(vMN));      // 太陽光（-z へ進む）の反射方向
         float g = max(dot(r, normalize(cameraPosition - vMW)), 0.0);
         // 正反射の向き（反射光はコロニーの窓へ入るので外からはほぼ見えない）＋ 太陽に照らされた鏡面の明るいにじみ
         float lit = max(dot(normalize(vMN), vec3(0.0, 0.0, 1.0)), 0.0);
         outgoingLight += vec3(1.0, 0.95, 0.85) * (pow(g, 80.0) * 6.0 + pow(g, 3.0) * 0.9 * lit + lit * 0.35) * uMirrorSun;
+        outgoingLight += vec3(1.0, 0.96, 0.88) * uMirrorSpace * (lit * 5.0 + pow(g, 2.0) * 6.0 + pow(g, 30.0) * 20.0); // 宇宙からの全景では太陽光を照り返してビカビカ光る
       }
       #include <opaque_fragment>`);
   };
@@ -952,6 +953,7 @@ function build() {
 }
 let sunHalo, sunCore;
 const mirrorSun = { value: 1 }; // 夜（ミラーを閉じている）は0
+const mirrorSpace = { value: 0 }; // 宇宙からの全景で見ているときの照り返し
 let stars, glare, carMesh, trainMesh, clouds, carLights, lampHeadMat, lampPoolMat, lampPools;
 
 // ===== 軌道エレベーター（両端の蓋に沿って、端の道路から中心の宇宙港へ上がる） =====
@@ -1001,7 +1003,7 @@ function updateElevators(t) {
 // コロニーは遠心力で1Gになる角速度で自転する。描画上はコロニーを止めて、宇宙側（星・誘導灯・外の船・宇宙カメラ）を逆に回す
 const OMEGA = Math.sqrt(9.8 / R);                    // 約0.057 rad/s（約110秒で1回転）
 const spaceFrame = new THREE.Group(); scene.add(spaceFrame);
-const space = { on: false, az: 0.6, tilt: 2.2, dist: 26000, tz: -HL * 0.25 };
+const space = { on: false, mode: 'overview', az: 0.6, tilt: 2.2, dist: 26000, tz: -HL * 0.25 };
 const ENTRY_Z = -HL - 420;                            // 入口（-z 端の外側ドックの正面）
 const guideRings = [], extShips = [];
 let hullBeacons;
@@ -1112,6 +1114,9 @@ function updateSpace(t) {
   const gd = THREE.MathUtils.clamp(space.dist / 4000, 1, 6);
   for (const p of guideRings) { p.material.opacity = 0.05 + 0.6 * pulse; p.material.size = (2.5 + 2.5 * pulse) / Math.sqrt(gd); const gk = 1 / (gd * gd); p.material.color.setRGB(3 * gk, 0.15 * gk, 0.1 * gk); }
   U.uSpace.value = space.on ? 1 : 0;
+  const overview = space.on && space.mode === 'overview';
+  if (post.dofQuad) post.dofQuad.material.uniforms.uBackOnly.value = overview ? 1 : 0;
+  mirrorSpace.value = overview ? mirrorSun.value : 0;
   // 宇宙からの眺め: ブルームを強く広くして、外壁の細かさを光のにじみでごまかす。ピントは注視点まで
   if (post.bloom) {
     const [bs, bt] = dayNight.bloom || [0.4, 1.15];
@@ -1148,8 +1153,8 @@ function updateSpaceCamera() {
   camera.lookAt(0, 0, space.tz);
 }
 const setSpaceDOF = on => { if (post.dofQuad) post.dofQuad.material.uniforms.uFocusCap.value = on ? Math.max(space.dist, 1001) : 150; };
-function toggleSpace() { space.on = !space.on; if (space.on) Object.assign(space, { az: 0.6, tilt: 2.55, dist: 30000, tz: -HL * 0.25 }); setSpaceDOF(space.on); envTimer = 99; }
-function viewEntrance() { space.on = true; Object.assign(space, { az: 0.9, tilt: 2.45, dist: 3200, tz: ENTRY_Z - 1800 }); setSpaceDOF(true); envTimer = 99; }
+function toggleSpace() { space.on = !space.on; if (space.on) Object.assign(space, { mode: 'overview', az: 0.6, tilt: 1.0, dist: 30000, tz: -2000 }); /* 太陽側の斜め上から（ミラーの鏡面が見える） */ setSpaceDOF(space.on); envTimer = 99; }
+function viewEntrance() { space.on = true; Object.assign(space, { mode: 'entrance', az: 0.9, tilt: 2.45, dist: 3200, tz: ENTRY_Z - 1800 }); setSpaceDOF(true); envTimer = 99; }
 function leaveSpace() { if (space.on) { space.on = false; setSpaceDOF(false); envTimer = 99; } }
 addEventListener('wheel', e => { if (space.on) space.dist = THREE.MathUtils.clamp(space.dist * Math.exp(e.deltaY * 0.001), 3000, 90000); }, { passive: true });
 
@@ -1778,16 +1783,17 @@ function makePost() {
       }`,
   }));
   post.dofQuad = new FullScreenQuad(new THREE.ShaderMaterial({
-    uniforms: { tColor: { value: null }, tAO: { value: null }, uAOTexel: { value: new THREE.Vector2(2 / w, 2 / h) }, tDepth: { value: null }, tFocus: { value: null }, uFar: { value: camera.far }, uRes: { value: new THREE.Vector2(w, h) }, uMaxR: { value: 6 * h / 800 }, uFocusCap: { value: 150 } },
+    uniforms: { tColor: { value: null }, tAO: { value: null }, uAOTexel: { value: new THREE.Vector2(2 / w, 2 / h) }, tDepth: { value: null }, tFocus: { value: null }, uFar: { value: camera.far }, uRes: { value: new THREE.Vector2(w, h) }, uMaxR: { value: 6 * h / 800 }, uFocusCap: { value: 150 }, uBackOnly: { value: 0 } },
     vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
     fragmentShader: depthFn + `
-      uniform float uFocusCap;
+      uniform float uFocusCap; uniform float uBackOnly;
       uniform sampler2D tColor; uniform sampler2D tFocus; uniform sampler2D tAO; uniform vec2 uAOTexel; uniform vec2 uRes; uniform float uMaxR;
       vec3 shaded(vec2 uv) { return texture2D(tColor, uv).rgb * texture2D(tAO, uv).r; }
       varying vec2 vUv;
       float F;
       float coc(float z) {
         if (z > uFar * 0.9) return 0.0;                 // 宇宙（背景の星）はボカさない
+        if (uFocusCap > 1000.0 && uBackOnly > 0.5) return (z < uFocusCap || z > uFocusCap + 25000.0) ? 0.0 : clamp((z - uFocusCap) / z * 2.5, 0.0, 1.0) * uMaxR * 0.45; // 宇宙からの全景: ピントより奥のコロニーだけ少しぼかす（手前の誘導灯・宇宙船はくっきり）
         if (uFocusCap > 1000.0) return z > uFocusCap + 25000.0 ? 0.0 : clamp(abs(z - uFocusCap) / max(z, 1.0) * 2.2, 0.0, 1.0) * uMaxR; // 宇宙から: 注視点にピント（星は対象外）
         // 手前のボケは控えめ、奥はピント距離が近いほど強くボケる
         if (z < F) return clamp((F / max(z, 0.1) - 1.0) * 0.06, 0.0, 1.0) * uMaxR;
