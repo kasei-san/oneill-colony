@@ -26,7 +26,7 @@
   #demo-cap { position: fixed; inset: 0; color: #f6f9fc; transition: opacity 0.9s; opacity: 0; pointer-events: none; font-family: "Hiragino Sans", system-ui, sans-serif; }
   #demo-cap .ch { position: absolute; left: clamp(20px, 3.2vw, 56px); top: clamp(18px, 3vw, 48px); font-size: clamp(13px, 1.25vw, 20px); letter-spacing: 0.25em; color: #a8d8ff; font-weight: 700;
     text-shadow: 0 1px 6px rgba(0,0,0,0.85); }
-  #demo-cap h2 { position: absolute; left: clamp(20px, 3.2vw, 56px); top: calc(clamp(18px, 3vw, 48px) + clamp(18px, 1.9vw, 30px)); margin: 0; max-width: 60vw;
+  #demo-cap h2 { position: absolute; left: clamp(20px, 3.2vw, 56px); top: calc(clamp(18px, 3vw, 48px) + clamp(18px, 1.9vw, 30px)); margin: 0; white-space: nowrap;
     font-size: clamp(32px, 4.4vw, 72px); font-weight: 900; letter-spacing: 0.03em; line-height: 1.15; text-shadow: 0 2px 4px rgba(0,0,0,0.7), 0 4px 22px rgba(0,0,0,0.55); }
   #demo-cap p { position: absolute; right: clamp(16px, 2.4vw, 40px); bottom: clamp(56px, 6vw, 84px); margin: 0; width: min(24em, 42vw); padding: 0.9em 1.1em;
     font-size: clamp(15px, 1.35vw, 21px); line-height: 1.8; font-weight: 600; background: rgba(6,10,20,0.55); border-radius: 12px; backdrop-filter: blur(6px);
@@ -3600,10 +3600,10 @@ const SHOTS = [
     from: () => { const i = 16, sx = 4 * P + 6.5; go(STRIP_PHI[0] + sx / R, oldEndAt(0, i) - 520, 7, 0, 0.2); }, d: { z: 220, pitch: 0.06 } },   // 旧市街の路地から、境目の向こうの新市街の高層ビルを見上げる
   { ch: '街区', t: '寺社と鎮守の森', x: 'コロニーの人々は、地球から神様もいっしょに連れてきたのだ。朱色の鳥居と鎮守の森が、住宅地の中に静かにたたずんでいるのだ。', dur: 11, from: () => { const t = landmarks.samples.temple, n = t.ns || { s: t.s + 110, z: t.z }, dx = n.s - t.s, dz = n.z - t.z, L = Math.hypot(dx, dz) || 1; lookAt(t.k, t.s - dx / L * 120, t.z - dz / L * 120, t.s + dx * 0.5, t.z + dz * 0.5, 38, 0.7); }, d: { h: -6 } },  // 寺社の向こうに歓楽街
   { ch: '街区', t: '工場と倉庫街', x: '造船の町として始まったネオ・ミヤギも、今は商業と観光の街なのだ。工場は宇宙港側の端に残るだけで、のこぎり屋根の工場や倉庫が並ぶ「街の裏側」になっているのだ。', dur: 11, from: atSample('factory', 55, 60), d: { z: 60, yaw: 0.15 } },
-  { ch: '街区', t: '農業区画', x: '両端の蓋の近くには、畑とガラスの温室が広がっているのだ。最初の作物の枝豆もここで育ったのだ。300万人の食べ物の多くは、このコロニーの中で育てているのだ。', dur: 18, from: () => {}, d: {},
-    follow: () => {                                  // 軸の近くから横（周方向）を向いて、軸のまわりを360°ぐるりと回る
-      const u = Math.min(demo.t / SHOTLIST()[demo.i].dur, 1), e = u * u * (3 - 2 * u), th = STRIP_PHI[0] - 0.4 + TAU * e;
-      Object.assign(player, { th, z: -HL + 1150, h: R - 200, yaw: Math.PI / 2 - 0.35, pitch: -0.55 }); }, roll: 0 },   // 軸のそばから横を向く（画角が窓1枚より広いので常に畑が入る）
+  { ch: '街区', t: '農業区画', x: '両端の蓋の近くには、畑とガラスの温室が広がっているのだ。最初の作物の枝豆もここで育ったのだ。300万人の食べ物の多くは、このコロニーの中で育てているのだ。', dur: 14, from: () => {}, d: {},
+    follow: () => {                                  // 畑の上を周方向に低空飛行（前方の畑が円筒に沿ってせり上がる）
+      const u = Math.min(demo.t / SHOTLIST()[demo.i].dur, 1), th = STRIP_PHI[0] - 0.42 + 0.84 * u;
+      Object.assign(player, { th, z: -HL + 750 + 120 * Math.sin(u * Math.PI), h: 55 + 25 * Math.sin(u * Math.PI * 2), yaw: Math.PI / 2 + 0.25 * Math.sin(u * Math.PI), pitch: 0.06 }); }, roll: 0.12 },   // 軸のそばから横を向く（画角が窓1枚より広いので常に畑が入る）
   { ch: '観光地', t: '大きな公園', x: '街のところどころにある大きな公園なのだ。鳥が群れで旋回し、木々が風に揺れているのだ。空の代わりに見えるのは、反対側の街なのだ。', dur: 12, from: preset('大きな公園'), d: { z: 100, pitch: 0.1 } },
   { ch: '観光地', t: '窓の上を渡る橋', x: '陸地と陸地のあいだにある窓は、全面ガラスなのだ。その上を渡る橋からは、足元のガラス越しに宇宙が見えるのだ。', dur: 13, from: preset('橋の上'), d: { th: 0.04, pitch: -0.3 } },
   { ch: '観光地', t: 'リング大観覧車と遊園地', x: '窓のすぐそばに立つ直径240mの大観覧車なのだ。駅を降りるとすぐ遊園地で、ジェットコースターやメリーゴーラウンドがにぎやかに動いているのだ。', dur: 14, from: () => {}, orbit: { k: 1, s: 1470, z: BRIDGE_Z[RESORT.bi] + 300, h: 150, r: 380, ch: 40, ch1: 90, a0: -0.9, a1: 0.3 } },   // 観覧車のまわりを回り込む
