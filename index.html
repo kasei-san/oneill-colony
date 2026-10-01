@@ -478,6 +478,7 @@ const GEO = {
 const PAL = {
   office: [0xcdc9c1, 0xb7b9bd, 0xd9d3c5, 0xa3abb4, 0x8b9aac, 0xe4e0d8, 0xaca69b],
   glass: [0x6c8298, 0x5a6f88, 0x7c93a7, 0x8aa1b2, 0x4f6478],
+  shop: [0xe8463a, 0xf2c230, 0x2f6fd8, 0xf4f1eb, 0xd8c6a8, 0x4caf50, 0xe67e22, 0xc8c0b0, 0x9aa3ad],
   cyber: [0x3a3f4a, 0x2e3340, 0x4a3d52, 0x3d4a55, 0x55505a, 0x2a2f38, 0x5a4a4a, 0x384858],
   house: [0xf1ece1, 0xe6dccb, 0xd9cfbd, 0xcac3b6, 0xf4f1eb, 0xd8c6a8, 0xbfc8cc],
   roof: [0x55514c, 0x7a4033, 0x4a5866, 0x8a5b3d, 0x3d4045, 0x67704f],
@@ -522,6 +523,8 @@ function genStrip(k) {
   // 4割 オフィス街 / 2割5分 歓楽街 / 残りは発展していない（まわりは元の住宅地や公園のまま）
   const terms = BRIDGE_Z.map(zb => { const r = rand(); return { z: zb, kind: r < 0.4 ? 'office' : r < 0.65 ? 'neon' : 'plain', r: rr(260, 420) }; });
   (landmarks.terminals ??= [])[k] = terms;
+  const nearPlainTerm = (s, z) => terms.some(t => t.kind === 'plain' && Math.hypot(s, z - t.z) < 260);
+  landmarks.samples ??= {};
   const termAt = (s, z) => { for (const t of terms) { const d = Math.hypot(s, z - t.z); if (d < t.r && t.kind !== 'plain') return { t, f: 1 - d / t.r }; } return null; };
   const neonC = Array.from({ length: 18 }, () => ({ s: rr(-1300, 1300), z: rr(-7600, 7600), r: rr(380, 560) }));
   const neonMap = new Uint8Array(NS * NZ * 4);
@@ -564,12 +567,73 @@ function genStrip(k) {
     else if (rand() < 0.06) type = 'park';
     else if (tm && rand() < 0.35 + 0.6 * tm.f) type = 'down';           // ターミナルのまわりはビルが密集
     else if (rand() < cb * 1.15) type = 'down';
+    else if (Math.abs(z) > HL - 1400 && rand() < 0.55) type = 'farm';                     // 両端の蓋の近くは農業区画
+    else if (c > 0.78 && rand() < 0.3) type = 'factory';                                   // 窓際は工場・倉庫街
+    else if (nearPlainTerm(s, z) && rand() < 0.6) type = 'shop';                           // 発展していないターミナルの駅前は商店街
+    else if (rand() < 0.012) type = 'campus';
+    else if (c > 0.4 && c < 0.8 && rand() < 0.06) type = 'danchi';
     else if (rand() < 0.3 + 0.35 * (1 - c) + cb * 0.3) type = 'mid';
-    else type = 'res';
+    else { const r = rand(); type = r < 0.07 ? 'school' : r < 0.11 ? 'shop' : r < 0.14 ? 'temple' : 'res'; }
+    if (!landmarks.samples[type] && k === 0) landmarks.samples[type] = { k, s, z };
     blockTypes[k][i * NZ + j] = type;
     neonBlk = (type === 'down' || type === 'mid') && (neonC.some(c => Math.hypot(s - c.s, z - c.z) < c.r) || (tm && tm.t.kind === 'neon'));
     if (neonBlk) neonMap[(j * NS + i) * 4] = 255;
 
+    if (type === 'school') {                         // 学校: 校舎・体育館・グラウンド（トラック）・プール
+      rect('#b9b2a2', s, z, BLK, BLK);
+      rect('#b89a6a', s + 16, z - 14, 58, 60);
+      g.strokeStyle = 'rgba(255,255,255,0.8)'; g.lineWidth = 1.5; g.beginPath(); g.ellipse(s + 16, z - 14, 22, 25, 0, 0, TAU); g.stroke();
+      rect('#3aa0d0', s + 33, z + 33, 16, 22);
+      addB(ch, s - 30, z, 26, 84, 0, 14, 0xf0ece0);
+      addB(ch, s + 10, z + 33, 26, 22, 0, 10, 0xc8ccd2);
+      for (let n = 0; n < 8; n++) addTree(ch, s - 45 + n * 12.5, z + 45, rr(6, 9));
+      continue;
+    }
+    if (type === 'shop') {                           // 商店街: 細長い店が通りの両側にびっしり、アーケードの屋根
+      rect('#a8a196', s, z, BLK, BLK); rect('#d8cdb8', s, z, 10, BLK);
+      for (const sd of [-1, 1]) for (let zz = -44; zz < 44; zz += rr(5, 7.5)) addB(ch, s + sd * 11, z + zz + 3, 12, 5.2, 0, rr(6, 11), pick(PAL.shop));
+      addB(ch, s, z, 9, BLK - 4, 7.5, 0.4, 0xd8dce4, false);
+      for (const sd of [-1, 1]) for (let zz = -40; zz < 44; zz += 13) addHouse(ch, s + sd * 36, z + zz, rr(9, 12), rr(9, 11), rr(5.5, 7), pick(PAL.house), pick(PAL.roof), rr(2.5, 3.5));
+      continue;
+    }
+    if (type === 'factory') {                        // 工場・倉庫: 大屋根の建屋、煙突、タンク
+      rect('#8f8c86', s, z, BLK, BLK);
+      addB(ch, s - 14, z - 12, 60, 62, 0, rr(10, 14), pick([0xb8b4ac, 0x9aa0a8, 0xc8c0b0]));
+      addB(ch, s + 30, z + 28, 28, 34, 0, rr(8, 10), 0xa8aeb4);
+      for (let n = 0; n < 3; n++) addB(ch, s + 30, z - 38 + n * 15, 11, 11, 0, rr(8, 12), 0xe0e0d8);
+      const ch_h = rr(28, 40);                         // 煙突は細くして窓が出ないようにする
+      addB(ch, s - 38, z + 38, 2.6, 2.6, 0, ch_h, 0xd8d8d0);
+      addB(ch, s - 38, z + 38, 2.8, 2.8, ch_h - 5, 3, 0xc0392b);
+      continue;
+    }
+    if (type === 'campus') {                         // 病院・大学: 中庭を囲む白い建物群
+      rect('#c9c4ba', s, z, BLK, BLK); rect('#6f9a52', s, z, 40, 40);
+      addB(ch, s, z - 34, 84, 18, 0, rr(24, 36), 0xf4f4f0); addB(ch, s, z + 34, 84, 18, 0, rr(14, 22), 0xeceae4);
+      addB(ch, s - 34, z, 18, 50, 0, 18, 0xf0eee8); addB(ch, s + 34, z, 18, 50, 0, 18, 0xf0eee8);
+      for (let n = 0; n < 6; n++) addTree(ch, s + rr(-16, 16), z + rr(-16, 16), rr(6, 9));
+      continue;
+    }
+    if (type === 'temple') {                         // 寺社: 鎮守の森・参道・鳥居・本殿・墓地
+      rect('#5f8d47', s, z, BLK, BLK); rect('#d8d0bc', s, z - 10, 7, 74);
+      addHouse(ch, s, z + 20, 24, 18, 6, 0x8b5a3c, 0x3a3f45, 9);
+      for (const zz of [-40, -24]) { addB(ch, s - 4.5, z + zz, 1, 1, 0, 7, 0xd0302a, false); addB(ch, s + 4.5, z + zz, 1, 1, 0, 7, 0xd0302a, false); addB(ch, s, z + zz, 13, 1.2, 7, 0.9, 0xd0302a, false); }
+      for (let a = 0; a < 5; a++) for (let b = 0; b < 4; b++) addB(ch, s + 22 + a * 4, z - 38 + b * 5, 1.2, 0.8, 0, 1.4, 0x9a9a98, false);
+      for (let n = 0; n < 22; n++) { const ts = s + rr(-44, 44), tz = z + rr(-44, 44); if (Math.abs(ts - s) < 14 && tz < z + 32) continue; addTree(ch, ts, tz, rr(9, 15)); }
+      continue;
+    }
+    if (type === 'farm') {                           // 農業区画: 畑の帯とガラスの温室
+      const greenhouse = rand() < 0.5;
+      for (let n = 0; n < 8; n++) rect(pick(['#7aa84e', '#a8c060', '#8f7a50', '#c8b860', '#5f9a48']), s - BLK / 2 + n * BLK / 8 + BLK / 16, z, BLK / 8 - 1.5, BLK);
+      if (greenhouse) for (let n = 0; n < 5; n++) { addB(ch, s - 38 + n * 19, z, 14, 86, 0, 3.2, 0xdde8ee, false); ch.roof.push(th(s - 38 + n * 19), z, 3.2, 14, 2.4, 86, 0xe8f2f6); }
+      continue;
+    }
+    if (type === 'danchi') {                         // 団地: 同じ形の中層住宅が平行に並ぶ
+      rect('#a9a598', s, z, BLK, BLK);
+      const hh = (5 + Math.floor(rand() * 4)) * 3;
+      for (let r = 0; r < 3; r++) addB(ch, s, z - 30 + r * 30, 80, 11, 0, hh, pick([0xece6d8, 0xe4e0d6, 0xf0ece4]));
+      for (let n = 0; n < 6; n++) addTree(ch, s + rr(-40, 40), z + (rand() < 0.5 ? -15 : 15), rr(6, 9));
+      continue;
+    }
     if (type === 'plaza') { rect('#cfc8bb', s, z, BLK + 6, BLK + 6); continue; }   // 駅前広場（駅ビルは buildRailStations で置く）
     if (type === 'resort') {                          // 駐車場（アスファルト）とレジャー施設の舗装・植え込み
       const lot = j === 36 && (i === NS - 4 || i === NS - 3);   // 駅前の2ブロックだけ駐車場
@@ -1998,8 +2062,8 @@ function typeAt(th, z) {
   const t = blockTypes[k][i * NZ + j];
   return t === 'river' && k === RIVERSIDE.k && j >= RIVERSIDE.j0 && j <= RIVERSIDE.j1 ? 'riverside' : t;
 }
-const CAR_D = { plaza: 0.6, down: 1, mid: 0.55, res: 0.2, park: 0.1, river: 0.08, resort: 0.35, riverside: 0.15 };
-const PED_D = { plaza: 1, down: 1, mid: 0.45, res: 0.12, park: 0.3, river: 0.05, resort: 1, riverside: 1 };
+const CAR_D = { school: 0.2, shop: 0.3, factory: 0.4, campus: 0.4, temple: 0.1, farm: 0.08, danchi: 0.25, plaza: 0.6, down: 1, mid: 0.55, res: 0.2, park: 0.1, river: 0.08, resort: 0.35, riverside: 0.15 };
+const PED_D = { school: 0.5, shop: 1, factory: 0.08, campus: 0.4, temple: 0.25, farm: 0.03, danchi: 0.3, plaza: 1, down: 1, mid: 0.45, res: 0.12, park: 0.3, river: 0.05, resort: 1, riverside: 1 };
 const local = { cars: [], peds: [] };
 const LC = { n: LOW ? 250 : 600, r: 700 }, LP = { n: LOW ? 600 : 1600, r: 320 };
 let localCarMeshes, pedBodyMesh, pedSkinMesh;
@@ -2172,7 +2236,8 @@ function spawnPed(q) {
   const dir = rand() < 0.5 ? 1 : -1, side = rand() < 0.5 ? 1 : -1;
   q.ring = rand() < 0.5; q.k = p.k; q.v = rr(1.0, 1.6) * dir;
   if (p.t === 'riverside') { q.ring = false; q.s = sCenter(RIVER_I[p.k]) + (rand() < 0.5 ? -1 : 1) * rr(33, 46); q.z = p.z; } // 屋台の遊歩道を川に沿って歩く
-  else if (p.t === 'park' || p.t === 'resort' || p.t === 'plaza') { q.s = p.s; q.z = p.z; }                       // 公園は自由に歩く
+  else if (p.t === 'shop') { q.ring = false; q.s = p.s + rr(-3.5, 3.5); q.z = p.z; }  // 商店街はアーケードの下を歩く
+  else if (p.t === 'park' || p.t === 'resort' || p.t === 'plaza' || p.t === 'school' || p.t === 'temple') { q.s = p.s; q.z = p.z; }                       // 公園は自由に歩く
   else if (q.ring) { q.z = edgeZ(p.z) + side * 6.5; q.s = p.s; }      // 歩道
   else { q.s = Math.round(p.s / P) * P + side * 6.5; q.z = p.z; }
   q.on = true;
@@ -2847,6 +2912,21 @@ const PRESETS = [
 const warp = document.getElementById('warp');
 for (const [label, fn] of PRESETS) {
   const b = document.createElement('button'); b.textContent = label; b.onclick = () => { fn(); b.blur(); }; warp.appendChild(b);
+}
+{
+  const tour = [['school', '学校'], ['shop', '商店街'], ['factory', '工場・倉庫街'], ['campus', '病院・大学'], ['temple', '寺社と墓地'], ['farm', '農業区画'], ['danchi', '団地']];
+  let ti = 0;
+  const b = document.createElement('button'); b.textContent = '街区めぐり（押すたび次へ）';
+  b.onclick = () => {
+    for (let n = 0; n < tour.length; n++) {
+      const [key, name] = tour[ti++ % tour.length], sp = landmarks.samples[key];
+      if (!sp) continue;
+      go(STRIP_PHI[sp.k] + (sp.s - 80) / R, sp.z - 110, 45, 0.6, -0.32);
+      b.textContent = `街区めぐり: ${name}（押すたび次へ）`; break;
+    }
+    b.blur();
+  };
+  warp.appendChild(b);
 }
 { const b = document.createElement('button'); b.textContent = '宇宙船の入口（宇宙から）'; b.onclick = () => { viewEntrance(); b.blur(); }; b.style.borderColor = '#7fb2ff'; warp.appendChild(b); }
 { const b = document.createElement('button'); b.textContent = '宇宙からコロニーを見る（O）'; b.onclick = () => { toggleSpace(); b.blur(); }; b.style.borderColor = '#7fb2ff'; warp.appendChild(b); }
