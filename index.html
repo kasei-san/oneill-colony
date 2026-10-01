@@ -417,6 +417,8 @@ M.ship = patch(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0
 const envMats = [M.bld, M.water, M.car, M.ship, M.carShape];
 M.bld.envMapIntensity = 0.9; M.water.envMapIntensity = 1.4; M.car.envMapIntensity = 1.0;
 let envCur = 0, envTimer = 99;
+// 映り込みの撮影から外す近くの構造物（橋・高架・柱）。環境マップは「無限遠」扱いなので、近い物を入れると曲面のガラスでぐにゃっと歪んで映る
+const envHide = [];
 const glassMeshes = []; // 映り込み撮影時は隠す（ガラスが前回の映り込みを写し込み続けるのを防ぐ）
 const envPos = new THREE.Vector3(1e9, 0, 0);
 const setEnv = () => { for (const m of envMats) m.envMap = envRTs[envCur].texture; U.uEnv.value = envRTs[envCur].texture; };
@@ -430,8 +432,10 @@ function updateEnv(dt) {
   cubeCam.position.copy(camera.position); cubeCam.updateMatrixWorld();
   const au = renderer.shadowMap.autoUpdate; renderer.shadowMap.autoUpdate = false;
   for (const g of glassMeshes) g.visible = false;
+  for (const g of envHide) g.visible = false;
   cubeCam.update(renderer, scene);
   for (const g of glassMeshes) g.visible = true;
+  for (const g of envHide) g.visible = true;
   renderer.shadowMap.autoUpdate = au;
   envCur = 1 - envCur; setEnv();
 }
@@ -748,7 +752,9 @@ function build() {
   }
   const concMesh = new THREE.Mesh(conc.geo(), M.concrete); concMesh.receiveShadow = concMesh.castShadow = true;
   const deckMesh = new THREE.Mesh(deck.geo(), M.deck); deckMesh.receiveShadow = deckMesh.castShadow = true;
-  scene.add(concMesh, deckMesh, instanced(GEO.box, M.concrete, misc, 6, { color: false }));
+  const miscMesh = instanced(GEO.box, M.concrete, misc, 6, { color: false });
+  scene.add(concMesh, deckMesh, miscMesh);
+  envHide.push(concMesh, deckMesh, miscMesh);
 
   // 街灯: 川の両岸（30mおき）と橋の両側の歩道（40mおき）。支柱・灯具・足元の光だまり
   const lampAt = [];
@@ -1363,7 +1369,7 @@ const spaceFrame = new THREE.Group(); scene.add(spaceFrame);
 const space = { on: false, mode: 'overview', az: 0.6, tilt: 2.2, dist: 26000, tz: -HL * 0.25 };
 const ENTRY_Z = -HL - 420;                            // 入口（-z 端の外側ドックの正面）
 const guideRings = [], extShips = [], otherColonies = [];
-let hullBeacons;
+let hullBeacons, hullRings; // 外側の環状フレームは中からガラス越しに見えるとぐにゃっとした白い弧になるので、宇宙から見るときだけ出す
 function buildExterior() {
   // 外殻（陸地の裏側）と両端の外側の蓋
   // 外壁パネル: 大小の板の色むら・継ぎ目・ハッチ・警告ストライプ（1枚=120m四方）
@@ -1395,7 +1401,8 @@ function buildExterior() {
   }
   const ringBuilder = new GeoBuilder();
   for (let z = -HL + 500; z < HL; z += 1000) ringBuilder.ringBand(GLASS_R, GLASS_R + 26, z - 12, z + 12, 0, TAU, 240);
-  scene.add(new THREE.Mesh(ringBuilder.geo(), patch(new THREE.MeshStandardMaterial({ color: 0x8a919a, roughness: 0.5, metalness: 0.5, emissive: 0x4a5058 }))));
+  hullRings = new THREE.Mesh(ringBuilder.geo(), patch(new THREE.MeshStandardMaterial({ color: 0x8a919a, roughness: 0.5, metalness: 0.5, emissive: 0x4a5058 })));
+  scene.add(hullRings);
   const hdMat = patch(new THREE.MeshStandardMaterial({ map: ptex, color: 0xb8bec6, roughness: 0.5, metalness: 0.4, emissive: 0xffffff, emissiveIntensity: 1.0, emissiveMap: ptex }));
   scene.add(instanced(GEO.box, hdMat, hullDetail, 6, { color: false, cast: false }));
   // 外殻の航行灯（赤・白が点滅）
@@ -1511,6 +1518,7 @@ function updateSpace(t) {
   const gd = THREE.MathUtils.clamp(space.dist / 4000, 1, 6);
   for (const p of guideRings) { p.material.opacity = 0.05 + 0.6 * pulse; p.material.size = (2.5 + 2.5 * pulse) / Math.sqrt(gd); const gk = 1 / (gd * gd); p.material.color.setRGB(3 * gk, 0.15 * gk, 0.1 * gk); }
   U.uSpace.value = space.on ? 1 : 0;
+  if (hullRings) hullRings.visible = space.on;
   const overview = space.on && space.mode === 'overview';
   if (post.dofQuad) post.dofQuad.material.uniforms.uBackOnly.value = overview ? 1 : 0;
   mirrorSpace.value = overview ? mirrorSun.value : 0;
