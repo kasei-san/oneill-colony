@@ -42,7 +42,7 @@
     ドラッグ: 視点 / WASD・矢印: 移動<br>
     Shift: 高速 / E・Space: 上昇 / Q・C: 下降<br>
     [ / ]: 画角 / B: ポストエフェクト切替 / T: トーンマップ ACES⇔AgX<br>
-    N: 昼⇔夜 / M: 音のミュート / H: パネル表示切替 / 左下の地図クリック: ワープ
+    O: 宇宙から見る（ドラッグ・ホイール） / N: 昼⇔夜 / M: 音のミュート / H: パネル表示切替 / 左下の地図クリック: ワープ
   </div>
 </div>
 <div id="warp" class="panel"></div>
@@ -135,7 +135,7 @@ const sunL = STRIP_PHI.map(p => new THREE.Vector3(-Math.cos(p), -Math.sin(p), 0)
     #else
       uniform float fogNear; uniform float fogFar;
     #endif
-    float colonyFogDens(vec3 p) { return 0.3 + 0.7 * exp(-max(${R.toFixed(1)} - length(p.xy), 0.0) / 1000.0); }
+    float colonyFogDens(vec3 p) { float r = length(p.xy); if (r > ${GLASS_R.toFixed(1)} || abs(p.z) > ${HL.toFixed(1)}) return 0.0; return 0.3 + 0.7 * exp(-max(${R.toFixed(1)} - r, 0.0) / 1000.0); } // 外の宇宙は霧なし
   #endif`;
   THREE.ShaderChunk.fog_fragment = `#ifdef USE_FOG
     vec3 fogD = vFogWorld - cameraPosition;
@@ -850,7 +850,8 @@ function build() {
   sg.setAttribute('position', new THREE.BufferAttribute(sp, 3)); sg.setAttribute('color', new THREE.BufferAttribute(sc, 3));
   stars = new THREE.Points(sg, new THREE.PointsMaterial({ size: 1.6, sizeAttenuation: false, vertexColors: true, fog: false }));
   stars.renderOrder = -1; stars.frustumCulled = false;
-  scene.add(stars);
+  spaceFrame.add(stars);
+  buildExterior();
 
   const [mc, mg] = canvas(128, 1024);
   const mgr = mg.createLinearGradient(0, 0, 0, 1024);
@@ -953,6 +954,117 @@ function build() {
   scene.add(trainMesh);
 }
 let stars, glare, carMesh, trainMesh, clouds, carLights, lampHeadMat, lampPoolMat, lampPools;
+
+// ===== コロニーの外: 自転・外殻・宇宙船の入口・誘導灯・外の宇宙船 =====
+// コロニーは遠心力で1Gになる角速度で自転する。描画上はコロニーを止めて、宇宙側（星・誘導灯・外の船・宇宙カメラ）を逆に回す
+const OMEGA = Math.sqrt(9.8 / R);                    // 約0.057 rad/s（約110秒で1回転）
+const spaceFrame = new THREE.Group(); scene.add(spaceFrame);
+const space = { on: false, az: 0.6, tilt: 2.2, dist: 26000, tz: -HL * 0.25 };
+const ENTRY_Z = -HL - 420;                            // 入口（-z 端の外側ドックの正面）
+const guideRings = [], extShips = [];
+function buildExterior() {
+  // 外殻（陸地の裏側）と両端の外側の蓋
+  const [pc, pg] = canvas(256, 256);
+  pg.fillStyle = '#5d636b'; pg.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 40; i++) { const v = 80 + Math.random() * 30 | 0; pg.fillStyle = `rgb(${v},${v + 4},${v + 10})`; pg.fillRect(Math.random() * 256, Math.random() * 256, 20 + Math.random() * 60, 10 + Math.random() * 30); }
+  pg.fillStyle = '#3b4047'; for (let i = 0; i <= 256; i += 32) { pg.fillRect(i, 0, 2, 256); pg.fillRect(0, i, 256, 2); }
+  const ptex = new THREE.CanvasTexture(pc); ptex.wrapS = ptex.wrapT = THREE.RepeatWrapping; ptex.colorSpace = THREE.SRGBColorSpace; ptex.anisotropy = ANISO;
+  const hullMat = patch(new THREE.MeshStandardMaterial({ map: ptex, roughness: 0.55, metalness: 0.3, side: THREE.BackSide, emissive: 0x2a2e35, emissiveMap: ptex }));
+  for (let k = 0; k < 3; k++) scene.add(new THREE.Mesh(stripPatch(GLASS_R, STRIP_PHI[k], (s, z) => [s / 120, z / 120], false), hullMat));
+  const capMat = patch(new THREE.MeshStandardMaterial({ map: ptex, roughness: 0.55, metalness: 0.3, emissive: 0x2a2e35, emissiveMap: ptex }));
+  for (const sg of [-1, 1]) {
+    const g = new THREE.CircleGeometry(GLASS_R + 5, 96);
+    if (sg < 0) g.rotateY(Math.PI);
+    g.translate(0, 0, sg * (HL + 2));
+    scene.add(new THREE.Mesh(g, capMat));
+  }
+  // -z 端: 宇宙船の入口（外側ドック）。暗い開口を光るリングで縁取り、投光器を並べる
+  const dockMat = patch(new THREE.MeshStandardMaterial({ color: 0xa9afb8, roughness: 0.45, metalness: 0.5 }));
+  scene.add(new THREE.Mesh(new THREE.CylinderGeometry(430, 560, 420, 48).rotateX(Math.PI / 2).translate(0, 0, -HL - 210), dockMat));
+  scene.add(new THREE.Mesh(new THREE.CircleGeometry(210, 48).rotateY(Math.PI).translate(0, 0, ENTRY_Z - 1), new THREE.MeshBasicMaterial({ color: 0x020305 })));
+  const ringMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.5, 4, 7) });
+  scene.add(new THREE.Mesh(new THREE.TorusGeometry(214, 5, 8, 96).translate(0, 0, ENTRY_Z - 2), ringMat));
+  scene.add(new THREE.Mesh(new THREE.TorusGeometry(300, 3, 6, 96).translate(0, 0, ENTRY_Z - 2), new THREE.MeshBasicMaterial({ color: new THREE.Color(5, 4, 2.5) })));
+  // +z 端: 発電・放熱設備
+  scene.add(new THREE.Mesh(new THREE.CylinderGeometry(320, 380, 500, 32).rotateX(Math.PI / 2).translate(0, 0, HL + 250), dockMat));
+  for (let i = 0; i < 6; i++) scene.add(new THREE.Mesh(new THREE.BoxGeometry(900, 8, 380).translate(800, 0, HL + 280).rotateZ(i / 6 * TAU + 0.26), dockMat));
+
+  // 誘導灯: 入口の手前に浮かぶ15個のリング。光が入口へ向かって順に流れる
+  const N = 15;
+  for (let i = 0; i < N; i++) {
+    const pts = [];
+    for (let j = 0; j < 12; j++) { const a = j / 12 * TAU; pts.push(Math.cos(a) * 240, Math.sin(a) * 240, ENTRY_Z - 500 - i * 650); }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    const m = new THREE.PointsMaterial({ color: new THREE.Color(1, 0.6, 0.2), size: 5, sizeAttenuation: false, fog: false });
+    const p = new THREE.Points(g, m); p.frustumCulled = false;
+    spaceFrame.add(p); guideRings.push(p);
+  }
+  // 外の宇宙船（推進剤を使う）: 遠くから減速して入口に入り、しばらくして出てきて加速して去る
+  const glowTex = gradientSprite([[0, 'rgba(255,255,255,1)'], [0.2, 'rgba(255,200,140,0.85)'], [0.5, 'rgba(255,140,80,0.25)'], [1, 'rgba(255,120,60,0)']]);
+  const navR = new THREE.MeshBasicMaterial({ color: new THREE.Color(8, 0.4, 0.3) }), navG = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.3, 8, 0.6) });
+  const cols = [0xd8432f, 0xf2c230, 0x1fa59a, 0x2f6fd8, 0x8a4fc8, 0xf08a24, 0xe8e8e8];
+  for (let i = 0; i < 7; i++) {
+    const col = cols[i % cols.length], big = i % 3 === 0, sc = big ? 5 : 3;  // 遠くからも見えるよう大きめ（全長約300〜500m）
+    const parts = [
+      vcol(new THREE.CylinderGeometry(7, 9, 70, 14).rotateX(Math.PI / 2), new THREE.Color(col).toArray()),
+      vcol(new THREE.SphereGeometry(7, 12, 8).scale(1, 1, 1.8).translate(0, 0, 36), [0.85, 0.87, 0.9]),
+      vcol(new THREE.BoxGeometry(56, 2.5, 18).translate(0, 0, -14), new THREE.Color(col).multiplyScalar(0.7).toArray()),
+      vcol(new THREE.BoxGeometry(18, 14, 16).translate(0, 0, -38), [0.35, 0.37, 0.4]),
+      vcol(new THREE.CylinderGeometry(4, 6, 8, 10).rotateX(Math.PI / 2).translate(-5, 0, -50), [0.2, 0.2, 0.22]),
+      vcol(new THREE.CylinderGeometry(4, 6, 8, 10).rotateX(Math.PI / 2).translate(5, 0, -50), [0.2, 0.2, 0.22]),
+    ];
+    const grp = new THREE.Group();
+    grp.add(new THREE.Mesh(mergeGeometries(parts), M.ship));
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, color: new THREE.Color(3, 2.6, 2.2) }));
+    glow.position.set(0, 0, -60); grp.add(glow);
+    // 噴射炎（加算合成の円すい）
+    const plume = new THREE.Mesh(new THREE.ConeGeometry(9, 1, 16, 1, true).translate(0, 0.5, 0).rotateX(-Math.PI / 2), // 根元 z=0、先端 z=-1
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(2.2, 2.6, 4), transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+    grp.add(plume);
+    for (const [m, x] of [[navR, -28], [navG, 28]]) { const n = new THREE.Mesh(new THREE.SphereGeometry(1.5, 6, 4), m); n.position.set(x, 0, -14); grp.add(n); }
+    grp.scale.setScalar(sc);
+    spaceFrame.add(grp);
+    const a = rand() * TAU, r = rr(30, 150);
+    extShips.push({ grp, glow, plume, x: Math.cos(a) * r, y: Math.sin(a) * r, ph: i / 7, period: rr(110, 150) });
+  }
+}
+function updateSpace(t) {
+  spaceFrame.rotation.z = -OMEGA * t;
+  const step = Math.floor(t * 7);
+  guideRings.forEach((p, i) => {
+    const hot = ((i + step) % guideRings.length) < 2;             // 入口へ向かって流れる光
+    p.material.color.setRGB(hot ? 8 : 1.2, hot ? 7 : 0.6, hot ? 5 : 0.2);
+    p.material.size = hot ? 8 : 4;
+  });
+  const zFar = ENTRY_Z - 16000;
+  for (const s of extShips) {
+    const T = s.period, u = ((t / T + s.ph) % 1) * T;
+    const tIn = T * 0.42, tDock = T * 0.16, tOut = T * 0.34;          // 進入・入港中・出港（残りは見えない）
+    let z, head = 1, thrust = 0, vis = true;
+    if (u < tIn) { const q = u / tIn; z = zFar + (ENTRY_Z + 400 - zFar) * (1 - (1 - q) * (1 - q)); thrust = 0.35 + 0.65 * (1 - q); }        // 減速しながら接近→入口へ
+    else if (u < tIn + tDock) { vis = false; z = ENTRY_Z + 400; }
+    else if (u < tIn + tDock + tOut) { const q = (u - tIn - tDock) / tOut; z = ENTRY_Z + 400 + (zFar - ENTRY_Z - 400) * q * q; head = -1; thrust = 0.4 + 0.6 * q; } // 出てきて加速
+    else { vis = false; z = zFar; }
+    s.grp.visible = vis;
+    s.grp.position.set(s.x, s.y, z);
+    s.grp.rotation.set(0, head > 0 ? 0 : Math.PI, 0);
+    const fl = 0.9 + 0.1 * Math.sin(t * 37 + s.ph * 9);
+    s.glow.scale.setScalar(70 * thrust * fl);
+    s.plume.scale.set(1, 1, 30 + 160 * thrust * fl); s.plume.position.z = -54;
+  }
+}
+function updateSpaceCamera() {
+  const p = new THREE.Vector3(Math.sin(space.tilt) * Math.cos(space.az), Math.sin(space.tilt) * Math.sin(space.az), Math.cos(space.tilt)).multiplyScalar(space.dist).add(new THREE.Vector3(0, 0, space.tz));
+  spaceFrame.updateMatrixWorld();
+  camera.position.copy(spaceFrame.localToWorld(p));
+  camera.up.set(0, 0, 1);
+  camera.lookAt(0, 0, space.tz);
+}
+const setSpaceDOF = on => { if (post.dofQuad) post.dofQuad.material.uniforms.uFocusCap.value = on ? 1e6 : 150; };
+function toggleSpace() { space.on = !space.on; if (space.on) Object.assign(space, { az: 0.6, tilt: 2.2, dist: 26000, tz: -HL * 0.25 }); setSpaceDOF(space.on); envTimer = 99; }
+function viewEntrance() { space.on = true; Object.assign(space, { az: 0.9, tilt: 2.45, dist: 3200, tz: ENTRY_Z - 1800 }); setSpaceDOF(true); envTimer = 99; }
+function leaveSpace() { if (space.on) { space.on = false; setSpaceDOF(false); envTimer = 99; } }
+addEventListener('wheel', e => { if (space.on) space.dist = THREE.MathUtils.clamp(space.dist * Math.exp(e.deltaY * 0.001), 3000, 90000); }, { passive: true });
 
 // 外側ミラー: 端（z=-HL）のヒンジまわりに開閉する。開くと太陽光が入り昼、窓に閉じると夜
 const mirrors = [];
@@ -1210,12 +1322,12 @@ function updateAudio(dt) {
     dens += t ? CAR_D[t] : 0; park += t === 'park' ? 1 : 0;
   }
   dens /= 5; park /= 5;
-  const low = 1 - THREE.MathUtils.smoothstep(h, 30, 900);
+  const low = space.on ? 0 : 1 - THREE.MathUtils.smoothstep(h, 30, 900);
   const set = (gn, v) => gn.gain.setTargetAtTime(audio.muted ? 0 : v, now, 0.4);
   set(audio.city, (0.08 + 0.3 * dens) * low);
-  set(audio.wind, 0.05 + 0.35 * THREE.MathUtils.smoothstep(h, 40, 1500));
+  set(audio.wind, space.on ? 0 : 0.05 + 0.35 * THREE.MathUtils.smoothstep(h, 40, 1500));
   audio.bp.frequency.setTargetAtTime(380 + 300 * Math.sin(now * 0.31) + 200 * Math.sin(now * 0.13), now, 0.5);
-  set(audio.hum, 0.05 * THREE.MathUtils.smoothstep(h, R - 900, R - 100));
+  set(audio.hum, space.on ? 0.03 : 0.05 * THREE.MathUtils.smoothstep(h, R - 900, R - 100));
   // 公園や住宅街の低いところでは鳥がさえずる
   const birdRate = (park * 1.5 + 0.2 * (1 - dens)) * (1 - THREE.MathUtils.smoothstep(h, 20, 200)) * (1 - U.uNight.value); // 夜は鳴かない
   if (!audio.muted && Math.random() < birdRate * step * 1.2) {
@@ -1575,22 +1687,23 @@ function makePost() {
       }`,
   }));
   post.dofQuad = new FullScreenQuad(new THREE.ShaderMaterial({
-    uniforms: { tColor: { value: null }, tAO: { value: null }, uAOTexel: { value: new THREE.Vector2(2 / w, 2 / h) }, tDepth: { value: null }, tFocus: { value: null }, uFar: { value: camera.far }, uRes: { value: new THREE.Vector2(w, h) }, uMaxR: { value: 6 * h / 800 } },
+    uniforms: { tColor: { value: null }, tAO: { value: null }, uAOTexel: { value: new THREE.Vector2(2 / w, 2 / h) }, tDepth: { value: null }, tFocus: { value: null }, uFar: { value: camera.far }, uRes: { value: new THREE.Vector2(w, h) }, uMaxR: { value: 6 * h / 800 }, uFocusCap: { value: 150 } },
     vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
     fragmentShader: depthFn + `
+      uniform float uFocusCap;
       uniform sampler2D tColor; uniform sampler2D tFocus; uniform sampler2D tAO; uniform vec2 uAOTexel; uniform vec2 uRes; uniform float uMaxR;
       vec3 shaded(vec2 uv) { return texture2D(tColor, uv).rgb * texture2D(tAO, uv).r; }
       varying vec2 vUv;
       float F;
       float coc(float z) {
-        if (z > uFar * 0.9) return 0.0;          // 宇宙（背景）はボカさず星を残す
+        if (z > uFar * 0.9 || uFocusCap > 1000.0) return 0.0; // 宇宙（背景）と宇宙からの眺めはボカさない
         // 手前のボケは控えめ、奥はピント距離が近いほど強くボケる
         if (z < F) return clamp((F / max(z, 0.1) - 1.0) * 0.06, 0.0, 1.0) * uMaxR;
         float ap = 0.35 + 0.45 * clamp(40.0 / F, 0.0, 1.0);
         return clamp((1.0 - F / z) * ap, 0.0, 1.0) * uMaxR;
       }
       void main() {
-        F = min(exp2(texture2D(tFocus, vec2(0.5)).r), 150.0); // 遠くを見ても中景（〜150m）はシャープに保つ
+        F = min(exp2(texture2D(tFocus, vec2(0.5)).r), uFocusCap); // 遠くを見ても中景（〜150m）はシャープに保つ
         float cz = viewDist(vUv), cc = coc(cz);
         float ao4 = 0.25 * (texture2D(tAO, vUv + uAOTexel * vec2(0.5, 0.5)).r + texture2D(tAO, vUv + uAOTexel * vec2(-0.5, 0.5)).r
                           + texture2D(tAO, vUv + uAOTexel * vec2(0.5, -0.5)).r + texture2D(tAO, vUv + uAOTexel * vec2(-0.5, -0.5)).r);
@@ -1746,8 +1859,11 @@ function updateSun() {
     Object.assign(sun.shadow.camera, { left: -half, right: half, top: half, bottom: -half });
     sun.shadow.camera.updateProjectionMatrix();
   }
-  glare.position.copy(camera.position).addScaledVector(sunL[k], 50000);
-  stars.position.copy(camera.position);
+  // 中では鏡に映った太陽、宇宙からは軸の先（+z）にある本物の太陽
+  if (space.on) glare.position.copy(camera.position).add(new THREE.Vector3(0, 0, 50000));
+  else glare.position.copy(camera.position).addScaledVector(sunL[k], 50000);
+  spaceFrame.updateMatrixWorld();
+  stars.position.copy(spaceFrame.worldToLocal(camera.position.clone()));
 }
 
 function updateLOD() {
@@ -1811,6 +1927,7 @@ renderer.domElement.addEventListener('pointerdown', e => { dragging = true; rend
 renderer.domElement.addEventListener('pointerup', e => { dragging = false; renderer.domElement.releasePointerCapture(e.pointerId); });
 renderer.domElement.addEventListener('pointermove', e => {
   if (!dragging) return;
+  if (space.on) { space.az -= e.movementX * 0.004; space.tilt = THREE.MathUtils.clamp(space.tilt - e.movementY * 0.004, 0.25, 2.9); return; }
   player.yaw -= e.movementX * 0.0035;
   player.pitch = THREE.MathUtils.clamp(player.pitch - e.movementY * 0.0035, -1.5, 1.5);
 });
@@ -1819,6 +1936,7 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyH') document.querySelectorAll('.panel').forEach(p => p.classList.toggle('hidden'));
   if (e.code === 'KeyB') post.on = !post.on;
   if (e.code === 'KeyN') toggleNight();
+  if (e.code === 'KeyO') toggleSpace();
   if (e.code === 'KeyT' && post.final) post.final.material.uniforms.uTM.value ^= 1;
   if (e.code === 'BracketLeft' || e.code === 'BracketRight') {
     camera.fov = THREE.MathUtils.clamp(camera.fov + (e.code === 'BracketRight' ? 5 : -5), 45, 115); camera.updateProjectionMatrix();
@@ -1836,7 +1954,7 @@ addEventListener('resize', () => {
 });
 
 // ===== ワープ =====
-const go = (th, z, h, yaw, pitch) => Object.assign(player, { th, z, h, yaw, pitch });
+const go = (th, z, h, yaw, pitch) => { leaveSpace(); Object.assign(player, { th, z, h, yaw, pitch }); };
 const roadS = s => Math.round(s / P) * P + 6.5; // 最寄りの南北道路の歩道
 const PRESETS = [
   ['窓際の遊歩道（初期位置）', () => go(STRIP_PHI[0] + (-STRIP_W / 2 + 12) / R, BRIDGE_Z[7] + 260, EYE, 0, 0.28)],
@@ -1853,6 +1971,8 @@ const warp = document.getElementById('warp');
 for (const [label, fn] of PRESETS) {
   const b = document.createElement('button'); b.textContent = label; b.onclick = () => { fn(); b.blur(); }; warp.appendChild(b);
 }
+{ const b = document.createElement('button'); b.textContent = '宇宙船の入口（宇宙から）'; b.onclick = () => { viewEntrance(); b.blur(); }; b.style.borderColor = '#7fb2ff'; warp.appendChild(b); }
+{ const b = document.createElement('button'); b.textContent = '宇宙からコロニーを見る（O）'; b.onclick = () => { toggleSpace(); b.blur(); }; b.style.borderColor = '#7fb2ff'; warp.appendChild(b); }
 { const b = document.createElement('button'); b.textContent = '☀︎ / ☾ 昼と夜を切り替え（N）'; b.onclick = () => { toggleNight(); b.blur(); }; b.style.borderColor = '#d8b25a'; warp.appendChild(b); }
 
 // ===== 展開図ミニマップ =====
@@ -1899,6 +2019,7 @@ function hud(dt) {
   fpsAcc += dt; fpsN++;
   if (fpsAcc < 0.4) return;
   el('s-fps').textContent = Math.round(fpsN / fpsAcc); fpsAcc = 0; fpsN = 0;
+  if (space.on) { el('s-loc').textContent = '宇宙空間（コロニーの外）'; el('s-alt').textContent = `距離 ${(space.dist / 1000).toFixed(1)} km`; el('s-spd').textContent = '-'; return; }
   const k = stripOf(player.th);
   el('s-loc').textContent = (isLand(player.th) ? `第${k + 1}陸地` : `第${k + 1}窓（橋）`) + ` / 軸方向 ${(player.z / 1000).toFixed(2)} km`;
   el('s-alt').textContent = player.h < 1000 ? `${player.h.toFixed(1)} m` : `${(player.h / 1000).toFixed(2)} km`;
@@ -1911,8 +2032,8 @@ let elapsed = 0, frameNo = 0;
 function frame() {
   const dt = Math.min(clock.getDelta(), 0.1);
   elapsed += dt;
-  updatePlayer(dt);
-  updateCamera();
+  if (space.on) updateSpaceCamera(); else { updatePlayer(dt); updateCamera(); }
+  updateSpace(elapsed);
   updateLOD();
   updateVehicles(elapsed);
   updateShips(elapsed);
@@ -1937,7 +2058,7 @@ setTimeout(() => {
   drawMinimapBase();
   PRESETS[0][1]();
   el('loading').classList.add('hidden');
-  window.__ready = true; window.__player = player; window.__ships = ships; window.__night = toggleNight; window.__scene = scene; window.__axis = () => axisCarMesh;
+  window.__ready = true; window.__player = player; window.__ships = ships; window.__night = toggleNight; window.__space = space; window.__toggleSpace = toggleSpace; window.__viewEntrance = viewEntrance; window.__extShips = extShips; window.__scene = scene; window.__axis = () => axisCarMesh;
   frame();
 }, 30);
 </script>
