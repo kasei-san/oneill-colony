@@ -766,7 +766,7 @@ function genStrip(k) {
         if (rand() < 0.06) continue;                                  // ところどころ細い路地
         const cs = s + (a - 1.5) * 23.5 + rr(-0.6, 0.6), cz = z + (b - 1.5) * 23.5 + rr(-0.6, 0.6);
         const w = rr(20.5, 23), d = rr(20.5, 23), h = (8 + Math.floor(rand() * 7)) * 3 + rr(-0.5, 0.5);
-        const col = new THREE.Color(pick([0x6a5e50, 0x5e564c, 0x72685a, 0x585450, 0x6a625a, 0x5a6058, 0x7a6a58, 0x605a54, 0x6e5a4a])).multiplyScalar(rr(1.0, 1.25)).getHex();   // 引きで見ても沈みすぎない明るさ
+        const col = new THREE.Color(pick([0xa89c88, 0x9a948a, 0xb4a890, 0x8f8c86, 0xa8a094, 0x9a9e94, 0xb8a68c, 0xa09a92, 0xb0a08c])).multiplyScalar(rr(0.9, 1.05)).getHex();   // 灰色やベージュ（新市街の白いビルとの差は残す）
         addB(ch, cs, cz, w, d, 0, h, col);
         for (let n = Math.floor(rr(1, 4)); n > 0; n--) {             // 屋上に増築された小屋
           const bh = rr(2.2, 3.6), x = cs + rr(-w / 3, w / 3), y = cz + rr(-d / 3, d / 3);
