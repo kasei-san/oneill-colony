@@ -85,7 +85,7 @@ const zCenter = j => (j - (NZ - 1) / 2) * P;
 const BRIDGE_Z = [];
 for (let j = 6; j < NZ - 1; j += 10) BRIDGE_Z.push(zCenter(j) + P / 2);
 const RIVER_I = [7, 20, 10];
-const RESORT = { k: 1, i0: NS - 6, j0: 35, j1: 42 };
+const RESORT = { k: 1, i0: NS - 6, bi: 7, j0: 75, j1: 82 };   // 観覧車と遊園地（新市街、7本目の橋のそば）
 // 拡張境界地区: 開発の時代ごとに街並みが変わる。-z 側から 開拓期の家並み → 増設された商業区 → 新しい高層ビル街 の順に並ぶ
 // 開発の帯: 宇宙港のある端（-z）から奥へ 農業区画 → 工業地帯 → 旧市街 → 新市街（その先の街）。旧市街と新市街の境目は少しギザギザ
 const ZONE = { farmEnd: -HL + 1400, indEnd: -HL + 2650, oldEnd: -HL + 5000 };
@@ -429,6 +429,8 @@ const M = {
   bld: patch(new THREE.MeshStandardMaterial({ roughness: 0.8, metalness: 0.05 }), { building: true }),
   roof: patch(new THREE.MeshStandardMaterial({ roughness: 0.85, side: THREE.DoubleSide })),
   tank: patch(new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.5 })),
+  plainBld: patch(new THREE.MeshStandardMaterial({ roughness: 0.75 })),
+  coolBld: patch(new THREE.MeshStandardMaterial({ roughness: 0.85, side: THREE.DoubleSide })),   // 窓のない建物（倉庫・発電所）
   tree: patch(new THREE.MeshStandardMaterial({ roughness: 0.95, vertexColors: true }), { wind: true }),
   water: patch(new THREE.MeshStandardMaterial({ color: 0x1d3f52, roughness: 0.03, metalness: 0.0 })),
   concrete: patch(new THREE.MeshStandardMaterial({ color: 0xc4c0b8, roughness: 0.85, side: THREE.DoubleSide })),
@@ -492,6 +494,8 @@ function updateEnv(dt) {
 const GEO = {
   box: new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0),
   cyl: new THREE.CylinderGeometry(0.5, 0.5, 1, 18).translate(0, 0.5, 0),
+  sph: new THREE.IcosahedronGeometry(0.5, 2).translate(0, 0.5, 0),
+  cooling: new THREE.CylinderGeometry(0.34, 0.5, 1, 24, 1, true).translate(0, 0.5, 0),   // 冷却塔（上がすぼまった筒）
   // のこぎり屋根: 東西方向に4つの山（片側が垂直な採光面）、南北に伸びる
   saw: (() => {
     const p = [], N = 4, w = 1 / N;
@@ -537,7 +541,7 @@ const stripCanvases = [];
 function getChunk(k, i, j) {
   const key = `${k}-${Math.floor(i / 14)}-${Math.floor(j / 10)}`;
   let c = chunks.get(key);
-  if (!c) { c = { k, sSum: 0, zSum: 0, n: 0, bld: [], roof: [], tree: [], far: [], cyl: [], saw: [], car: [] }; chunks.set(key, c); }
+  if (!c) { c = { k, sSum: 0, zSum: 0, n: 0, bld: [], roof: [], tree: [], far: [], cyl: [], saw: [], car: [], plain: [], sph: [], cooling: [] }; chunks.set(key, c); }
   return c;
 }
 
@@ -554,7 +558,7 @@ function genStrip(k) {
   const bigParks = [];
   for (let n = 0; n < 2; n++) {
     let i0; do { i0 = 2 + Math.floor(rand() * (NS - 7)); } while (river >= i0 - 1 && river <= i0 + 4);
-    bigParks.push({ i0, i1: i0 + 3, j0: 20 + n * 70 + Math.floor(rand() * 30), nj: 5 });
+    bigParks.push({ i0, i1: i0 + 3, j0: 52 + n * 38 + Math.floor(rand() * 22), nj: 5 });   // 新市街の中（旧市街の境目より奥）
   }
   bigParks.forEach(p => { p.j1 = p.j0 + p.nj - 1; });
   const cbdF = (s, z) => Math.max(...cbds.map(c => Math.exp(-(((z - c.z) / 1600) ** 2) - (((s - c.s) / 650) ** 2))));
@@ -592,6 +596,7 @@ function genStrip(k) {
     ch.roof.push(th(s), z, h, w, rh, d, roofCol);
     rect(hexCss(roofCol), s, z, w, d);
   };
+  const addPlain = (ch, s, z, w, d, h0, h, col) => { ch.plain.push(th(s), z, h0, w, h, d, col); rect(darken(col, 0.72), s, z, w, d); };
   const addTree = (ch, s, z, size) => {
     ch.tree.push(th(s), z, 0, size * 0.8, size, size * 0.8, pick(PAL.tree));
     g.fillStyle = '#3f6a30'; g.beginPath(); g.arc(s, z, size * 0.35, 0, TAU); g.fill();
@@ -653,6 +658,36 @@ function genStrip(k) {
     }
     if (type === 'factory') {                        // 工場: のこぎり屋根の建屋・事務棟・タンク群・パイプラック・煙突・駐車場
       rect('#8f8c86', s, z, BLK, BLK);
+      const variant = rand();
+      if (variant < 0.2) {                             // 球形のガスタンク基地（直径24〜34mの球を脚で支える）
+        rect('#9a968e', s, z, BLK, BLK);
+        const n = rand() < 0.5 ? 2 : 3;
+        for (let q = 0; q < n; q++) {
+          const d = rr(24, 34), x = s + (n === 2 ? (q - 0.5) * 42 : (q - 1) * 30), y = z + (q % 2 ? 14 : -14) * (n === 3 ? 1 : 0);
+          for (const [lx, lz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) addPlain(ch, x + lx * d * 0.3, y + lz * d * 0.3, 1.2, 1.2, 0, d * 0.45, 0x8a8f96);
+          ch.sph.push(th(x), y, d * 0.3, d, d, d, pick([0xe8e8e2, 0xd8dce0, 0xe8e0c8]));
+          g.fillStyle = '#d0d0c8'; g.beginPath(); g.arc(x, y, d / 2, 0, TAU); g.fill();
+        }
+        ch.cyl.push(th(s + 36), z + 34, 0, 18, 30, 18, 0xc8ccd0);                          // 円筒のガスホルダー
+        continue;
+      }
+      if (variant < 0.4) {                             // 発電所: 窓のない大きなタービン建屋、煙突2〜3本、冷却塔
+        rect('#8a8680', s, z, BLK, BLK);
+        addPlain(ch, s - 14, z - 10, 50, 64, 0, rr(22, 30), pick([0xb8bcc0, 0xa8acb0, 0xc0b8a8]));
+        addPlain(ch, s - 14, z - 10, 30, 40, 26, 8, 0x8a9098);
+        for (let q = 0; q < 2 + (rand() < 0.5 ? 1 : 0); q++) { const hh = rr(70, 95); ch.cyl.push(th(s + 20), z - 36 + q * 14, 0, 5, hh, 5, 0xd8d8d0); ch.cyl.push(th(s + 20), z - 36 + q * 14, hh - 8, 5.3, 5, 5.3, 0xc0392b); }
+        ch.cooling.push(th(s + 26), z + 28, 0, 34, rr(45, 60), 34, 0xd8d4cc);
+        continue;
+      }
+      if (variant < 0.6) {                             // 窓のない倉庫群（物流倉庫）
+        rect('#8f8c86', s, z, BLK, BLK);
+        for (let q = 0; q < 2; q++) {
+          const wh = rr(10, 18), x = s + (q - 0.5) * 44;
+          addPlain(ch, x, z, 38, 82, 0, wh, pick([0xd8d4ca, 0xc8ccd0, 0xb0a898, 0x9aa8b4]));
+          for (let n = 0; n < 5; n++) addPlain(ch, x + (q ? 19.3 : -19.3), z - 32 + n * 16, 0.5, 4, 0, 5, 0x5a6068);   // 搬入口のシャッター
+        }
+        continue;
+      }
       const flip = rand() < 0.5 ? 1 : -1, sx = v => s + v * flip;
       const shedC = pick([0xb8b4ac, 0x9aa0a8, 0xc8c0b0, 0xa8b0a0]), wallH = rr(7, 10);
       addB(ch, sx(-20), z - 8, 50, 66, 0, wallH, shedC, false);
@@ -695,7 +730,7 @@ function genStrip(k) {
         if (rand() < 0.06) continue;                                  // ところどころ細い路地
         const cs = s + (a - 1.5) * 23.5 + rr(-0.6, 0.6), cz = z + (b - 1.5) * 23.5 + rr(-0.6, 0.6);
         const w = rr(20.5, 23), d = rr(20.5, 23), h = (8 + Math.floor(rand() * 7)) * 3 + rr(-0.5, 0.5);
-        const col = new THREE.Color(pick([0x6a5e50, 0x5e564c, 0x72685a, 0x585450, 0x6a625a, 0x5a6058, 0x7a6a58, 0x605a54, 0x6e5a4a])).multiplyScalar(rr(0.7, 0.95)).getHex();
+        const col = new THREE.Color(pick([0x6a5e50, 0x5e564c, 0x72685a, 0x585450, 0x6a625a, 0x5a6058, 0x7a6a58, 0x605a54, 0x6e5a4a])).multiplyScalar(rr(1.0, 1.25)).getHex();   // 引きで見ても沈みすぎない明るさ
         addB(ch, cs, cz, w, d, 0, h, col);
         for (let n = Math.floor(rr(1, 4)); n > 0; n--) {             // 屋上に増築された小屋
           const bh = rr(2.2, 3.6), x = cs + rr(-w / 3, w / 3), y = cz + rr(-d / 3, d / 3);
@@ -762,7 +797,7 @@ function genStrip(k) {
     }
     if (type === 'plaza') { rect('#cfc8bb', s, z, BLK + 6, BLK + 6); continue; }   // 駅前広場（駅ビルは buildRailStations で置く）
     if (type === 'resort') {                          // 駐車場（アスファルト）とレジャー施設の舗装・植え込み
-      const lot = j === 36 && (i === NS - 4 || i === NS - 3);   // 駅前の2ブロックだけ駐車場
+      const lot = j === RESORT.j0 + 1 && (i === NS - 4 || i === NS - 3);   // 駅前の2ブロックだけ駐車場
       rect(lot ? '#3f4247' : '#cbbfa8', s, z, BLK + 6, BLK + 6);
       if (!lot) { rect('#7aa05a', s, z, BLK * 0.5, BLK * 0.5); for (let n = 0; n < 10; n++) { const e = rand() < 0.5, a = rr(-0.45, 0.45) * BLK, b = (rand() < 0.5 ? -1 : 1) * 0.45 * BLK; addTree(ch, s + (e ? a : b), z + (e ? b : a), rr(7, 11)); } }
       continue;
@@ -964,6 +999,12 @@ function build() {
     const cyF = instanced(GEO.cyl, M.tank, c.cyl, 7, { cast: false }); if (cyF) far.add(cyF);
     const sw = instanced(GEO.saw, M.roof, c.saw, 7); if (sw) near.add(sw);
     const pc = instanced(GEO.car, M.carShape, c.car, 7, { cast: false }); if (pc) near.add(pc);
+    const pl = instanced(GEO.box, M.plainBld, c.plain, 7); if (pl) near.add(pl);                 // 窓のない建物
+    const plF = instanced(GEO.box, M.plainBld, c.plain, 7, { cast: false }); if (plF) far.add(plF);
+    const sp = instanced(GEO.sph, M.tank, c.sph, 7); if (sp) near.add(sp);                       // 球形ガスタンク
+    const ct = instanced(GEO.cooling, M.plainBld, c.cooling, 7); if (ct) { ct.material = M.coolBld; near.add(ct); }
+    const ctF = instanced(GEO.cooling, M.coolBld, c.cooling, 7, { cast: false }); if (ctF) far.add(ctF);
+    const spF = instanced(GEO.sph, M.tank, c.sph, 7, { cast: false }); if (spF) far.add(spF);
     scene.add(near, far);
     lodChunks.push({ center: cyl(R, STRIP_PHI[c.k] + sMid / R, zMid), near, far, src: c, detail: null, seed: lodChunks.length + 1 });
   }
@@ -1517,7 +1558,7 @@ function buildLandmarks() {
 
   // --- 3. リング大観覧車: 窓の上の橋のわきに立つ直径240mの観覧車。てっぺんから足元のガラス越しに宇宙が見える
   {
-    const zb = BRIDGE_Z[3], th = STRIP_PHI[1] + 1470 / R, zw = zb + 300;
+    const zb = BRIDGE_Z[RESORT.bi], th = STRIP_PHI[1] + 1470 / R, zw = zb + 300;
     LM.wheel = { th, zb };
     const root = new THREE.Group();
     root.applyMatrix4(frameAt(th)); root.position.copy(cyl(R, th, zw));
@@ -3164,7 +3205,7 @@ const PRESETS = [
   ['上空 1500m', () => go(STRIP_PHI[0], -2000, 1500, 0, -0.05)],
   ['中心軸のそば（無重力帯）', () => go(STRIP_PHI[0], -HL + 1200, R - 80, 0, 0)],
   ['地上の電車の駅', () => go(STATIONS.ring[0] + 60 / RING_R, BRIDGE_Z[7] + 40, 26, Math.PI + 0.2, 0.05)],
-  ['ターミナル駅（線路の交差点）', () => { const ts = landmarks.terminals[0], t = ts.find(x => x.kind === 'office') || ts[0]; go(STRIP_PHI[0] + 160 / R, t.z - 260, 45, -0.45, 0.12); }],
+  ['ターミナル駅（線路の交差点）', () => { const ts = landmarks.terminals[0], t = newTownTerm(ts); go(STRIP_PHI[0] + 160 / R, t.z - 260, 45, -0.45, 0.12); }],
   ['★ 旧拡張エリア境界線', () => go(STRIP_PHI[0] + 330 / R, oldEndAt(0, 16) - 40, 24, 0, -0.06)],  // 旧市街の端から、境界の向こうの新市街を見る
   ['★ 拡張境界地区（農業→工業→旧市街→新市街）', () => go(STRIP_PHI[0] - 200 / R, ZONE.farmEnd - 500, 260, 0, -0.32)],
   ['★ 旧市街と再開発予定地', () => { const r = landmarks.redev[0] || { s: 0, z: (ZONE.indEnd + ZONE.oldEnd) / 2 }; lookAt(0, r.s - 140, r.z - 160, r.s, r.z, 45, 0.85); }],
@@ -3173,7 +3214,7 @@ const PRESETS = [
   ['★ 中心軸の駅（間近）', () => go(STRIP_PHI[0] + 0.62, HUB_Z - 750, R - 520, 0.35, 0.42)],
   ['★ 無重力パーク駅（電車が止まる）', () => go(STRIP_PHI[0] + 0.45, ZG_Z - 330, R - 130, 0.15, 0.25)],
   ['★ 無重力パーク（中心軸）', () => go(STRIP_PHI[0], ZG_Z - 600, R - 330, 0, 0.45)],
-  ['★ リング大観覧車と遊園地', () => go(STRIP_PHI[1] + 1100 / R, BRIDGE_Z[3] - 330, 50, 0.45, 0.22)],
+  ['★ リング大観覧車と遊園地', () => go(STRIP_PHI[1] + 1100 / R, BRIDGE_Z[RESORT.bi] - 330, 50, 0.45, 0.22)],
   ['宇宙港の出口（船の航路）', () => go(STRIP_PHI[0] + 0.2, -HL + 450, R - 360, 0.1, 0.12)],
 ];
 const warp = document.getElementById('warp');
@@ -3259,8 +3300,10 @@ const atSample = (key, h = 85, back = 130) => () => {
 // 2点のあいだから見下ろす（a の上空から b を見る）
 const lookAt = (k, as, az, bs, bz, h, pitchK = 0.85) => go(STRIP_PHI[k] + as / R, az, h, Math.atan2(bs - as, bz - az), -Math.atan2(h, Math.hypot(bs - as, bz - az)) * pitchK);
 // ターミナル駅: 縦の高架線の真上から交差点を見て、縦の線の電車を1本ホームに止める
+// 新市街（旧市街の境目より奥、+z 側の畑より手前）のオフィス街のターミナルを選ぶ
+const newTownTerm = ts => ts.find(x => x.kind === 'office' && x.z > ZONE.oldEnd + 400 && x.z < HL - 1600) || ts.find(x => x.z > ZONE.oldEnd + 400) || ts[0];
 function terminalShot() {
-  const k = 0, ts = landmarks.terminals[k], t = ts.find(x => x.kind === 'office') || ts[0];
+  const k = 0, ts = landmarks.terminals[k], t = newTownTerm(ts);
   lookAt(k, 150, t.z - 200, 0, t.z, 280, 1.0);              // ビルより高い位置から交差点を見下ろす
   const tr = vehicles.trains.find(x => !x.ring && x.dir > 0 && Math.abs(x.lane - STRIP_PHI[k]) < 0.01);
   if (tr && tr.stops) {
@@ -3320,7 +3363,7 @@ const SHOTS = [
   { ch: '夜', t: '提灯の灯る川辺の屋台通り', x: '陸地を流れる川の岸には遊歩道があり、夜になると屋台がずらりと並ぶのだ。提灯の下で、水面に揺れる光を眺めながら食べ歩きを楽しめるのだ。', dur: 15,
     from: () => go(STRIP_PHI[RIVERSIDE.k] + (sCenter(RIVER_I[RIVERSIDE.k]) + 51) / R, zCenter(RIVERSIDE.j0) - 40, 12, -0.12, 0.05), d: { z: 200 } },   // 歩く速さでゆっくり（通りを流しきらない）
   { ch: '夜', t: '夜の中央駅', x: '夜の中央駅は、ネオンの塊から光るエレベーターが放射状に伸びる、まるで巨大な灯台なのだ。', dur: 14, from: () => go(STRIP_PHI[0] + 0.25, HUB_Z - 420, R - 650, 0, 1.15), d: { yaw: 0.35, h: 60 } },  // 巣のすぐ下から見上げる
-  { ch: '夜', t: '虹色の観覧車', x: '観覧車の外周とジェットコースターのレールに虹色の光が流れ、遊園地の夜はまだまだ終わらないのだ。', dur: 13, from: () => { const zw = BRIDGE_Z[3] + 300; lookAt(1, 1470 - 60, zw - 320, 1470, zw, 60, -0.35); }, d: { z: 70, h: 10 } },  // 観覧車の正面から見上げる
+  { ch: '夜', t: '虹色の観覧車', x: '観覧車の外周とジェットコースターのレールに虹色の光が流れ、遊園地の夜はまだまだ終わらないのだ。', dur: 13, from: () => { const zw = BRIDGE_Z[RESORT.bi] + 300; lookAt(1, 1470 - 60, zw - 320, 1470, zw, 60, -0.35); }, d: { z: 70, h: 10 } },  // 観覧車の正面から見上げる
   { ch: '夜', t: 'ライトアップされた公園', x: '公園では、暖かな光が木々を足元から照らしているのだ。頭上には反対側の街の灯りが、星空のかわりに広がっているのだ。', dur: 13, from: preset('大きな公園'), d: { z: 100, pitch: 0.15 } },
   { ch: 'エピローグ', t: 'また朝が来る', x: 'やがてミラーが開き、コロニーにまた朝が来るのだ。宇宙に浮かぶ小さな故郷、ネオ・ミヤギへようこそ。――ガイドはずんだもんでした。', dur: 20, night: 0, fadeIn: true, fadeOut: true,
     space: { mode: 'overview', from: { az: 1.6, tilt: 1.2, dist: 22000, tz: -1000 }, to: { az: 0.5, tilt: 1.05, dist: 34000, tz: -2000 } } },
