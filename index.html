@@ -74,7 +74,8 @@ const BRIDGE_Z = [];
 for (let j = 6; j < NZ - 1; j += 10) BRIDGE_Z.push(zCenter(j) + P / 2);
 const RIVER_I = [7, 20, 10];
 const RESORT = { k: 1, i0: NS - 6, j0: 35, j1: 42 };
-const RIVERSIDE = { k: 2, j0: 76, j1: 78 };                  // 屋台が並ぶ川沿い（川の両岸の3ブロック）   // 観覧車と遊園地のエリア（第2陸地の東端）
+const RIVERSIDE = { k: 2, j0: 76, j1: 78 };                  // 屋台が並ぶ川沿い（川の両岸の遊歩道、3ブロック分）
+const RIVER_HW = 32;                                          // 川の水面の半幅（両岸に遊歩道を残す）   // 観覧車と遊園地のエリア（第2陸地の東端）
 
 function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const rand = mulberry32(20261001);
@@ -536,7 +537,6 @@ function genStrip(k) {
     const cb = cbdF(s, z), c = Math.abs(s) / (STRIP_W / 2);
     let type;
     if (RESORT.k === k && i >= RESORT.i0 && j >= RESORT.j0 && j <= RESORT.j1) type = 'resort';
-    else if (RIVERSIDE.k === k && Math.abs(i - river) === 1 && j >= RIVERSIDE.j0 && j <= RIVERSIDE.j1) type = 'riverside';
     else if (i === river) type = 'river';
     else if (i === 0 || i === NS - 1) type = 'park';
     else if (bigParks.some(p => i >= p.i0 && i <= p.i1 && j >= p.j0 && j <= p.j1)) type = 'park';
@@ -547,7 +547,6 @@ function genStrip(k) {
     else type = 'res';
     blockTypes[k][i * NZ + j] = type;
 
-    if (type === 'riverside') { rect('#b9ad97', s, z, BLK + 6, BLK + 6); for (let n = 0; n < 6; n++) addTree(ch, s - Math.sign(s - sCenter(river)) * 30, z + (n - 2.5) * 16, rr(7, 10)); continue; } // 屋台が並ぶ石畳の河岸
     if (type === 'resort') {                          // 駐車場（アスファルト）とレジャー施設の舗装・植え込み
       const lot = j === 36 && (i === NS - 4 || i === NS - 3);   // 駅前の2ブロックだけ駐車場
       rect(lot ? '#3f4247' : '#cbbfa8', s, z, BLK + 6, BLK + 6);
@@ -555,8 +554,9 @@ function genStrip(k) {
       continue;
     }
     if (type === 'river') {
-      rect('#3a6c88', s, z, BLK, BLK);
-      waterRecs.push(th(s), z, 0, BLK, 0.25, BLK);
+      rect('#b9ad97', s, z, BLK, BLK);                              // 両岸の遊歩道
+      rect('#3a6c88', s, z, RIVER_HW * 2, BLK);
+      waterRecs.push(th(s), z, 0, RIVER_HW * 2, 0.25, BLK);
       continue;
     }
     if (type === 'park') {
@@ -783,7 +783,7 @@ function build() {
   // 街灯: 川の両岸（30mおき）と橋の両側の歩道（40mおき）。支柱・灯具・足元の光だまり
   const lampAt = [];
   for (let k = 0; k < 3; k++) for (const side of [-1, 1]) {
-    const th = STRIP_PHI[k] + (sCenter(RIVER_I[k]) + side * 49) / R;
+    const th = STRIP_PHI[k] + (sCenter(RIVER_I[k]) + side * (RIVER_HW + 1.5)) / R;
     for (let z = -HL + 60; z < HL - 60; z += 30) lampAt.push([th, z]);
   }
   for (const zb of BRIDGE_Z) for (const psi of WIN_PHI) for (const dz of [-9.2, 9.2])
@@ -1372,17 +1372,17 @@ function buildRiverside() {
   const body = [], canopy = [], poles = [], lanterns = [], tables = [];
   const canopyCols = [0xc0392b, 0xf2f2f2, 0x2f5fa8, 0xd8a531, 0x2e7d5b, 0xe67e22];
   for (const side of [-1, 1]) {
-    const sStall = sc + side * 69;
+    const sStall = sc + side * 42;                                  // 遊歩道（水際32m〜道路47m）の道路寄り
     for (let z = z0; z < z1; z += rr(7, 10)) {
       if (rand() < 0.12) continue;                                  // ところどころ通り抜け
       body.push(th(sStall), z, 0, 3.2, 2.3, 4.2, pick([0x8b6b4a, 0xa07850, 0x6e5238, 0xc8b89a]));
       canopy.push(th(sStall - side * 0.6), z, 2.3, 4.4, 0.25, 4.8, pick(canopyCols));
-      if (rand() < 0.5) tables.push(th(sStall + side * 5), z + rr(-1, 1), 0, 1.4, 0.75, 1.4, 0xd8cfc0);
+      if (rand() < 0.5) tables.push(th(sStall - side * 5.5), z + rr(-1, 1), 0, 1.4, 0.75, 1.4, 0xd8cfc0);
     }
-    for (let z = z0; z <= z1; z += 18) poles.push(th(sc + side * 74), z, 0, 0.25, 4.5, 0.25, 0x5a4a3a);
+    for (let z = z0; z <= z1; z += 18) poles.push(th(sc + side * 33.5), z, 0, 0.25, 4.5, 0.25, 0x5a4a3a);
     for (let z = z0; z < z1; z += 1.8) {
       const u = ((z - z0) % 18) / 18;
-      lanterns.push(th(sc + side * 74), z, 4.2 - 0.7 * Math.sin(Math.PI * u), 0.55, 0.7, 0.55);
+      lanterns.push(th(sc + side * 33.5), z, 4.2 - 0.7 * Math.sin(Math.PI * u), 0.55, 0.7, 0.55);
     }
   }
   const wood = patch(new THREE.MeshStandardMaterial({ roughness: 0.8 }));
@@ -1824,7 +1824,8 @@ function typeAt(th, z) {
   const k = stripOf(th), s = angDiff(th, STRIP_PHI[k]) * R;
   const i = Math.round(s / P + (NS - 1) / 2), j = Math.round(z / P + (NZ - 1) / 2);
   if (i < 0 || i >= NS || j < 0 || j >= NZ) return null;
-  return blockTypes[k][i * NZ + j];
+  const t = blockTypes[k][i * NZ + j];
+  return t === 'river' && k === RIVERSIDE.k && j >= RIVERSIDE.j0 && j <= RIVERSIDE.j1 ? 'riverside' : t;
 }
 const CAR_D = { down: 1, mid: 0.55, res: 0.2, park: 0.1, river: 0.08, resort: 0.35, riverside: 0.15 };
 const PED_D = { down: 1, mid: 0.45, res: 0.12, park: 0.3, river: 0.05, resort: 1, riverside: 1 };
@@ -1999,10 +2000,15 @@ function spawnPed(q) {
   const p = sampleNear(LP.r, PED_D); if (!p) return;
   const dir = rand() < 0.5 ? 1 : -1, side = rand() < 0.5 ? 1 : -1;
   q.ring = rand() < 0.5; q.k = p.k; q.v = rr(1.0, 1.6) * dir;
-  if (p.t === 'park' || p.t === 'resort' || p.t === 'riverside') { q.s = p.s; q.z = p.z; }                       // 公園は自由に歩く
+  if (p.t === 'riverside') { q.ring = false; q.s = sCenter(RIVER_I[p.k]) + (rand() < 0.5 ? -1 : 1) * rr(33, 46); q.z = p.z; } // 屋台の遊歩道を川に沿って歩く
+  else if (p.t === 'park' || p.t === 'resort') { q.s = p.s; q.z = p.z; }                       // 公園は自由に歩く
   else if (q.ring) { q.z = edgeZ(p.z) + side * 6.5; q.s = p.s; }      // 歩道
   else { q.s = Math.round(p.s / P) * P + side * 6.5; q.z = p.z; }
   q.on = true;
+}
+function inWater(o) {                                  // 川の水面の上（橋になっている道路の上は除く）
+  const ds = Math.abs(o.s - sCenter(RIVER_I[o.k])), dz = Math.abs(o.z - (Math.round(o.z / P + (NZ - 1) / 2) - (NZ - 1) / 2) * P);
+  return ds < RIVER_HW + 0.5 && dz < BLK / 2;
 }
 function far(o, r) {
   const th = STRIP_PHI[o.k] + o.s / R;
@@ -2023,7 +2029,7 @@ function updateLocalLife(dt, t) {
   local.peds.forEach((q, i) => {
     if (!q.on) { spawnPed(q); if (!q.on) { writeBox(b, i * 16, 0, 0, 0, 0, 0, 0); return; } }
     if (q.ring) q.s += q.v * dt; else q.z += q.v * dt;
-    if (far(q, LP.r * 1.15)) { q.on = false; writeBox(b, i * 16, 0, 0, 0, 0, 0, 0); return; }
+    if (far(q, LP.r * 1.15) || inWater(q)) { q.on = false; writeBox(b, i * 16, 0, 0, 0, 0, 0, 0); return; }
     writeBox(b, i * 16, STRIP_PHI[q.k] + q.s / R, q.z, Math.abs(Math.sin(t * 7 + q.bob)) * 0.06, 1, 1, 1);
   });
   pedBodyMesh.instanceMatrix.needsUpdate = true;
