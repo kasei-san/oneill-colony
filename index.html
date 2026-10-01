@@ -73,6 +73,7 @@ const zCenter = j => (j - (NZ - 1) / 2) * P;
 const BRIDGE_Z = [];
 for (let j = 6; j < NZ - 1; j += 10) BRIDGE_Z.push(zCenter(j) + P / 2);
 const RIVER_I = [7, 20, 10];
+const RESORT = { k: 1, i0: NS - 6, j0: 31, j1: 42 };   // 観覧車と遊園地のエリア（第2陸地の東端）
 
 function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const rand = mulberry32(20261001);
@@ -513,7 +514,8 @@ function genStrip(k) {
     ch.sSum += s; ch.zSum += z; ch.n++;
     const cb = cbdF(s, z), c = Math.abs(s) / (STRIP_W / 2);
     let type;
-    if (i === river) type = 'river';
+    if (RESORT.k === k && i >= RESORT.i0 && j >= RESORT.j0 && j <= RESORT.j1) type = 'resort';
+    else if (i === river) type = 'river';
     else if (i === 0 || i === NS - 1) type = 'park';
     else if (bigParks.some(p => i >= p.i0 && i <= p.i1 && j >= p.j0 && j <= p.j1)) type = 'park';
     else if (Math.abs(i - river) === 1 && rand() < 0.45) type = 'park';
@@ -523,6 +525,12 @@ function genStrip(k) {
     else type = 'res';
     blockTypes[k][i * NZ + j] = type;
 
+    if (type === 'resort') {                          // 駐車場（アスファルト）とレジャー施設の舗装・植え込み
+      const lot = j <= RESORT.j0 + 3 && i <= NS - 3;
+      rect(lot ? '#3f4247' : '#cbbfa8', s, z, BLK + 6, BLK + 6);
+      if (!lot) { rect('#7aa05a', s, z, BLK * 0.5, BLK * 0.5); for (let n = 0; n < 10; n++) { const e = rand() < 0.5, a = rr(-0.45, 0.45) * BLK, b = (rand() < 0.5 ? -1 : 1) * 0.45 * BLK; addTree(ch, s + (e ? a : b), z + (e ? b : a), rr(7, 11)); } }
+      continue;
+    }
     if (type === 'river') {
       rect('#3a6c88', s, z, BLK, BLK);
       waterRecs.push(th(s), z, 0, BLK, 0.25, BLK);
@@ -1015,7 +1023,7 @@ const ZG_Z = 2500;                                    // 無重力パークの�
 const HUB_Z = -500;
 const HUB_SPOKES = [];
 for (let k = 0; k < 3; k++) for (const d of [-0.25, 0.25]) HUB_SPOKES.push(STRIP_PHI[k] + d);   // 陸地ごとに2本、計6本
-let hubCabMesh, hubNeonMat, hubStripMat;
+let hubCabMesh, hubNeonMat;
 function buildHubStation() {
   // 巣: 内側は軸の電車が通るので空け（半径80m〜240m）、外ほど低く・端ほど細る塊
   const cells = [], pipes = [];
@@ -1036,12 +1044,11 @@ function buildHubStation() {
   scene.add(instanced(GEO.box, M.bld, pipes, 7, { cast: false }));
 
   // スポーク（エレベーターのシャフト）: 巣の外側から地面まで。トラス風に柱4本＋横材
-  const posts = [], braces = [], bases = [], strips = [];
+  const posts = [], braces = [], bases = [];
   for (const th of HUB_SPOKES) {
     const top = R - 230;
     for (const [ds, dz] of [[-9, -9], [9, -9], [-9, 9], [9, 9]]) posts.push(th + ds / R, HUB_Z + dz, 0, 2.2, top, 2.2);
     for (let h = 60; h < top; h += 60) { braces.push(th, HUB_Z - 9, h, 20, 1.2, 1.2); braces.push(th, HUB_Z + 9, h, 20, 1.2, 1.2); braces.push(th - 9 / R, HUB_Z, h + 30, 1.2, 1.2, 20); braces.push(th + 9 / R, HUB_Z, h + 30, 1.2, 1.2, 20); }
-    for (const dz of [-11, 11]) strips.push(th, HUB_Z + dz, 0, 1, top, 0.6);                    // 光る帯
     bases.push(th, HUB_Z, 0, 60, 26, 60, 0xb8bec6);                                               // 地上駅
     bases.push(th, HUB_Z, 26, 40, 8, 40, 0x8a9099);
   }
@@ -1049,8 +1056,6 @@ function buildHubStation() {
   scene.add(instanced(GEO.box, trussM, posts, 6, { color: false, cast: false }));
   scene.add(instanced(GEO.box, trussM, braces, 6, { color: false, cast: false }));
   scene.add(instanced(GEO.box, M.bld, bases, 7, { cast: false }));
-  hubStripMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.2, 1.2, 1.6) });
-  scene.add(instanced(GEO.box, hubStripMat, strips, 6, { color: false, cast: false }));
   // かご（各スポークに上り下り2台ずつ）
   hubCabMesh = new THREE.InstancedMesh(GEO.box, patch(new THREE.MeshStandardMaterial({ color: 0xf2f4f6, roughness: 0.3, metalness: 0.3, emissive: 0xffc8f0, emissiveIntensity: 0.6 })), HUB_SPOKES.length * 2);
   hubCabMesh.frustumCulled = false;
@@ -1084,10 +1089,10 @@ function buildHubStation() {
   };
   for (let i = 0; i < 220; i++) {
     const zz = rr(-1, 1), z = HUB_Z + zz * 250, taper = 1 - zz * zz;
-    addSign(rand() * TAU, z, 92 + 150 * taper * rr(0.6, 1.08), rr(28, 70), rand() < 0.55 ? 'down' : rand() < 0.5 ? 'side' : 'east');
+    addSign(rand() * TAU, z, 92 + 150 * taper * rr(0.6, 1.08), rr(9, 22), rand() < 0.55 ? 'down' : rand() < 0.5 ? 'side' : 'east');
   }
-  for (const th of HUB_SPOKES) for (let h = 250; h < R - 400; h += rr(180, 420)) addSign(th, HUB_Z + (rand() < 0.5 ? -12 : 12), R - h, rr(18, 30), 'side');   // スポークの柱
-  for (const th of HUB_SPOKES) addSign(th, HUB_Z - 31, R - 30, 44, 'side');                                                                          // 地上駅
+  for (const th of HUB_SPOKES) for (let h = 250; h < R - 400; h += rr(180, 420)) addSign(th, HUB_Z + (rand() < 0.5 ? -12 : 12), R - h, rr(8, 13), 'side');   // スポークの柱
+  for (const th of HUB_SPOKES) addSign(th, HUB_Z - 31, R - 30, 18, 'side');                                                                          // 地上駅
   hubNeonMat = new THREE.MeshBasicMaterial({ map: atlas, transparent: true, side: THREE.DoubleSide, depthWrite: false, color: new THREE.Color(2.2, 2.2, 2.2) });
   const neon = new THREE.Mesh(mergeGeometries(geos), hubNeonMat); neon.renderOrder = 2;
   scene.add(neon);
@@ -1104,7 +1109,6 @@ function updateHubStation(t) {
   hubCabMesh.instanceMatrix.needsUpdate = true;
   const n = U.uNight.value, flick = 0.92 + 0.08 * Math.sin(t * 31) * Math.sin(t * 7.3);
   hubNeonMat.color.setScalar((3.5 + 3.5 * n) * flick);
-  hubStripMat.color.setRGB(0.2 + 0.6 * n, 1.2 + 2.5 * n, 1.6 + 4 * n);
 }
 const LM = {};
 function frameAt(th) {                                // 円筒上の局所フレーム（x=東, y=上, z=北）の回転行列
@@ -1163,35 +1167,9 @@ function buildLandmarks() {
     g.add(LM.zgPeople);
     scene.add(g);
   }
-  // --- 2. 逆さ滝: 地上から軸へ噴き上げた水が、コロニーの自転のせいで曲がって落ちる（コリオリの力）
-  {
-    const k = 1, pk = landmarks.parks[1][1];
-    const f = LM.fountain = { k, s: pk.s, z: pk.z };
-    const th0 = STRIP_PHI[k] + f.s / R;
-    const base = new THREE.Group();
-    base.applyMatrix4(frameAt(th0)); base.position.copy(cyl(R, th0, f.z));
-    const stone = patch(new THREE.MeshStandardMaterial({ color: 0xd8d2c4, roughness: 0.7 }));
-    base.add(new THREE.Mesh(new THREE.CylinderGeometry(42, 46, 1.2, 48).translate(0, 0.6, 0), stone));         // 池の縁
-    base.add(new THREE.Mesh(new THREE.CylinderGeometry(40, 40, 0.4, 48).translate(0, 1.0, 0), M.water));      // 池
-    base.add(new THREE.Mesh(new THREE.CylinderGeometry(3.5, 6, 18, 16).translate(0, 9, 0), stone));           // 噴出塔
-    LM.fLightM = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.7, 0.8, 0.9) });
-    base.add(new THREE.Mesh(new THREE.TorusGeometry(40, 0.6, 6, 64).rotateX(Math.PI / 2).translate(0, 1.3, 0), LM.fLightM));
-    scene.add(base);
-    // 水滴（慣性系で直線運動 → 回転系に戻して表示）
-    const N = LOW ? 2500 : 6000;
-    const pos = new Float32Array(N * 3);
-    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
-    LM.fMat = new THREE.PointsMaterial({ color: new THREE.Color(0.85, 0.93, 1.0), size: 2.2, transparent: true, opacity: 0.75, depthWrite: false });
-    const pts = new THREE.Points(g, LM.fMat); pts.frustumCulled = false;
-    scene.add(pts);
-    const v = 82, wr = OMEGA * R;
-    f.T = 2 * R * v / (v * v + wr * wr);               // 地面に戻るまでの時間
-    f.drops = Array.from({ length: N }, () => ({ ph: rand(), dv: rr(-1.5, 1.5), de: rr(-1.2, 1.2), dz: rr(-1.2, 1.2) }));
-    Object.assign(f, { pts, pos, th0, v, wr, top: 18 });
-  }
   // --- 3. リング大観覧車: 窓の上の橋のわきに立つ直径240mの観覧車。てっぺんから足元のガラス越しに宇宙が見える
   {
-    const th = WIN_PHI[1], zb = BRIDGE_Z[3], zw = zb + 34;
+    const zb = BRIDGE_Z[3], th = STRIP_PHI[1] + 1460 / R, zw = zb + 230;
     LM.wheel = { th, zb };
     const root = new THREE.Group();
     root.applyMatrix4(frameAt(th)); root.position.copy(cyl(R, th, zw));
@@ -1200,7 +1178,7 @@ function buildLandmarks() {
     // 支柱（ガラス面から立ち上がるA字の脚）
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
       const leg = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 3, 1, 8), steel);
-      const a = new THREE.Vector3(sx * 70, -(GLASS_R - R), sz * 14), b = new THREE.Vector3(0, HUB, sz * 6);
+      const a = new THREE.Vector3(sx * 70, 0, sz * 14), b = new THREE.Vector3(0, HUB, sz * 6);
       leg.position.copy(a).add(b).multiplyScalar(0.5); leg.scale.y = a.distanceTo(b);
       leg.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize());
       root.add(leg);
@@ -1225,7 +1203,92 @@ function buildLandmarks() {
     root.add(LM.gond);
     Object.assign(LM.wheel, { wheel, RAD, HUB, NG, NL, lc });
     scene.add(root);
+    buildResort(zb);
   }
+}
+// 観覧車まわりのレジャーエリア: 遊園地・駅・駐車場・ホテルや商業ビル（第2陸地の東端、局所座標 s=東, z=北）
+function buildResort(zb) {
+  const K = 1, thS = s => STRIP_PHI[K] + s / R;
+  const place = (obj, s, z, h0 = 0) => { obj.applyMatrix4(frameAt(thS(s))); obj.position.copy(cyl(R - h0, thS(s), z)); scene.add(obj); return obj; };
+  const paint = c => patch(new THREE.MeshStandardMaterial({ color: c, roughness: 0.6, metalness: 0.1 }));
+  const bld = [], misc = [];
+  // ホテル・商業ビル（窓つき）
+  bld.push(thS(990), zb + 260, 0, 50, 140, 40, 0xd8d2c4, thS(990), zb + 260, 140, 30, 12, 26, 0xc0392b);   // ホテル（屋上の赤い看板塔）
+  bld.push(thS(1010), zb + 470, 0, 70, 70, 45, 0x9aa3ad, thS(990), zb + 640, 0, 45, 95, 45, 0x6c8298);
+  bld.push(thS(1000), zb + 80, 0, 70, 22, 60, 0xe6dccb);                                              // ショッピングモール
+  bld.push(thS(1150), zb - 30, 0, 110, 14, 24, 0xe8e8e8);                                              // 駅舎（高架の下）
+  scene.add(instanced(GEO.box, M.bld, bld, 7, { cast: true }));
+  // 駅: 環状高架（高さ16m）の両側にホームと屋根
+  for (const dz of [-8, 8]) misc.push(thS(1150), zb + dz, 14.5, 150, 1.5, 6, 0xbfbcb5);
+  misc.push(thS(1150), zb, 23, 160, 0.8, 28, 0x2f6fa8);
+  for (let x = -70; x <= 70; x += 20) for (const dz of [-10.5, 10.5]) misc.push(thS(1150 + x), zb + dz, 0, 0.8, 23, 0.8, 0x8a8f96);
+  // 駐車場: 白線と停まっている車
+  const lots = [];
+  for (let row = 0; row < 9; row++) for (let c = 0; c < 40; c++) {
+    const s = 960 + c * 6.5, z = zb - 520 + row * 32;
+    misc.push(thS(s - 3.25), z, 0.02, 0.15, 0.05, 5.5, 0xf0f0f0);
+    if (rand() < 0.72) lots.push(thS(s), z + (row % 2 ? 1 : -1) * 0.2, 0, 1, 1, 1, pick(PAL.car));
+  }
+  const parked = new THREE.InstancedMesh(GEO.car, M.carShape, lots.length / 7);
+  for (let q = 0; q < lots.length / 7; q++) {
+    writeCar(parked.instanceMatrix.array, q * 16, lots[q * 7], lots[q * 7 + 1], false, q % 2 ? 1 : -1);
+    parked.setColorAt(q, new THREE.Color(lots[q * 7 + 6]));
+  }
+  parked.computeBoundingSphere(); scene.add(parked);
+  // 遊園地の屋台・テント（色とりどりの屋根）
+  const tents = [], tc = [0xe8463a, 0xf2c230, 0x2f6fd8, 0x4caf50, 0xd8448a, 0xf08a24, 0xffffff];
+  for (let n = 0; n < 40; n++) {
+    const s = rr(1080, 1420), z = zb + rr(360, 640), w = rr(6, 14), col = pick(tc);
+    misc.push(thS(s), z, 0, w, 3, w, 0xf2efe8);
+    tents.push(thS(s), z, 3, w * 1.1, rr(3, 5), w * 1.1, col);
+  }
+  scene.add(instanced(GEO.box, patch(new THREE.MeshStandardMaterial({ roughness: 0.7 })), misc, 7, { cast: true }));
+  scene.add(instanced(GEO.roof, M.roof, tents, 7, { cast: true }));
+  // ジェットコースター（閉じた曲線に沿ったレールと支柱、走る車両）
+  const pts = [];
+  for (let i = 0; i < 24; i++) {
+    const a = i / 24 * TAU;
+    pts.push(new THREE.Vector3(Math.cos(a) * 130 + Math.sin(a * 2) * 40, 8 + 22 * (1 + Math.sin(a * 3 + 1)) + (i === 3 ? 30 : 0), Math.sin(a) * 110));
+  }
+  const curve = new THREE.CatmullRomCurve3(pts, true, 'catmullrom', 0.5);
+  const coaster = new THREE.Group();
+  coaster.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 400, 1.1, 6, true), paint(0xe8463a)));
+  const sup = paint(0xeeeeee);
+  for (let i = 0; i < 60; i++) { const p = curve.getPoint(i / 60); const c = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.7, p.y, 6), sup); c.position.set(p.x, p.y / 2, p.z); coaster.add(c); }
+  const cars = new THREE.InstancedMesh(new THREE.BoxGeometry(2.6, 1.6, 4).translate(0, 1.4, 0), paint(0x2f6fd8), 6);
+  coaster.add(cars);
+  place(coaster, 1230, zb + 470);
+  // メリーゴーラウンド
+  const merry = new THREE.Group();
+  merry.add(new THREE.Mesh(new THREE.CylinderGeometry(14, 14, 1.2, 24).translate(0, 0.6, 0), paint(0xf2c230)));
+  merry.add(new THREE.Mesh(new THREE.ConeGeometry(16, 7, 24).translate(0, 11, 0), paint(0xd8448a)));
+  merry.add(new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 8, 8).translate(0, 4.5, 0), paint(0xffffff)));
+  const horses = new THREE.Group();
+  for (let i = 0; i < 12; i++) { const h = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.6, 2.2), paint(pick(tc))); const a = i / 12 * TAU; h.position.set(Math.cos(a) * 10, 3, Math.sin(a) * 10); horses.add(h); }
+  merry.add(horses);
+  place(merry, 1370, zb + 130);
+  // フリーフォール（上下する座席の輪）
+  const drop = new THREE.Group();
+  drop.add(new THREE.Mesh(new THREE.CylinderGeometry(2.5, 3.5, 90, 12).translate(0, 45, 0), paint(0xdfe3e8)));
+  drop.add(new THREE.Mesh(new THREE.CylinderGeometry(6, 6, 4, 16).translate(0, 92, 0), paint(0xe8463a)));
+  const seat = new THREE.Mesh(new THREE.CylinderGeometry(6, 6, 2.5, 16), paint(0xf2c230));
+  drop.add(seat);
+  place(drop, 1100, zb + 160);
+  LM.resort = { coaster: { curve, cars }, horses, seat };
+}
+function updateResort(t) {
+  const r = LM.resort; if (!r) return;
+  const u0 = (t * 0.018) % 1, m = new THREE.Matrix4(), q = new THREE.Quaternion();
+  for (let i = 0; i < 6; i++) {
+    const u = (u0 - i * 0.0035 + 1) % 1, p = r.coaster.curve.getPointAt(u), tg = r.coaster.curve.getTangentAt(u);
+    q.setFromUnitVectors(new THREE.Vector3(0, 0, 1), tg);
+    r.coaster.cars.setMatrixAt(i, m.compose(p, q, new THREE.Vector3(1, 1, 1)));
+  }
+  r.coaster.cars.instanceMatrix.needsUpdate = true;
+  r.horses.rotation.y = t * 0.6;
+  r.horses.children.forEach((h, i) => { h.position.y = 3 + Math.sin(t * 2 + i) * 0.6; });
+  const ph = (t % 14) / 14;                                          // ゆっくり上がって一気に落ちる
+  r.seat.position.y = ph < 0.6 ? 5 + 80 * (ph / 0.6) : ph < 0.7 ? 85 : ph < 0.75 ? 85 - 80 * ((ph - 0.7) / 0.05) ** 2 : 5;
 }
 const _lm = new THREE.Matrix4(), _lq = new THREE.Quaternion(), _lv = new THREE.Vector3(), _ls = new THREE.Vector3(1, 1, 1);
 function updateLandmarks(t) {
@@ -1244,24 +1307,7 @@ function updateLandmarks(t) {
   });
   LM.zgPeople.instanceMatrix.needsUpdate = true;
   LM.zgLightM.color.setRGB(0.6 + 3 * night, 0.7 + 4 * night, 0.8 + 6 * night);
-  // 逆さ滝
-  const f = LM.fountain, c0 = Math.cos(f.th0), s0 = Math.sin(f.th0);
-  const inV = [-c0, -s0], eV = [-s0, c0];
-  for (let i = 0; i < f.drops.length; i++) {
-    const d = f.drops[i], tt = ((t / f.T + d.ph) % 1) * f.T, vv = f.v + d.dv;
-    const r0 = R - f.top;
-    // 慣性系: 位置 = 噴出口 + 速度×時間（速度 = 上向き vv ＋ 地面の回転速度 ωr ＋ ばらつき）
-    const px = r0 * c0 + (inV[0] * vv + eV[0] * (OMEGA * r0 + d.de)) * tt;
-    const py = r0 * s0 + (inV[1] * vv + eV[1] * (OMEGA * r0 + d.de)) * tt;
-    // 回転系（コロニー）に戻す: -ωt 回転
-    const a = -OMEGA * tt, ca = Math.cos(a), sa = Math.sin(a);
-    let x = px * ca - py * sa, y = px * sa + py * ca;
-    if (x * x + y * y > R * R) { x = y = 0; }       // 地面より下は隠す
-    f.pos[i * 3] = x; f.pos[i * 3 + 1] = y; f.pos[i * 3 + 2] = f.z + d.dz * tt;
-  }
-  f.pts.geometry.attributes.position.needsUpdate = true;
-  LM.fMat.color.setRGB(0.85 + 0.6 * night, 0.93 + 0.2 * night, 1.0 + 1.6 * night);
-  LM.fLightM.color.setRGB(0.7 + 4 * night, 0.8 + 3 * night, 0.9 + 6 * night);
+  updateResort(t);
   // 観覧車
   const w = LM.wheel, rot = t * 0.025;
   w.wheel.rotation.z = rot;
@@ -1629,8 +1675,8 @@ function typeAt(th, z) {
   if (i < 0 || i >= NS || j < 0 || j >= NZ) return null;
   return blockTypes[k][i * NZ + j];
 }
-const CAR_D = { down: 1, mid: 0.55, res: 0.2, park: 0.1, river: 0.08 };
-const PED_D = { down: 1, mid: 0.45, res: 0.12, park: 0.3, river: 0.05 };
+const CAR_D = { down: 1, mid: 0.55, res: 0.2, park: 0.1, river: 0.08, resort: 0.35 };
+const PED_D = { down: 1, mid: 0.45, res: 0.12, park: 0.3, river: 0.05, resort: 1 };
 const local = { cars: [], peds: [] };
 const LC = { n: LOW ? 250 : 600, r: 700 }, LP = { n: LOW ? 600 : 1600, r: 320 };
 let localCarMeshes, pedBodyMesh, pedSkinMesh;
@@ -1801,7 +1847,7 @@ function spawnPed(q) {
   const p = sampleNear(LP.r, PED_D); if (!p) return;
   const dir = rand() < 0.5 ? 1 : -1, side = rand() < 0.5 ? 1 : -1;
   q.ring = rand() < 0.5; q.k = p.k; q.v = rr(1.0, 1.6) * dir;
-  if (p.t === 'park') { q.s = p.s; q.z = p.z; }                       // 公園は自由に歩く
+  if (p.t === 'park' || p.t === 'resort') { q.s = p.s; q.z = p.z; }                       // 公園は自由に歩く
   else if (q.ring) { q.z = edgeZ(p.z) + side * 6.5; q.s = p.s; }      // 歩道
   else { q.s = Math.round(p.s / P) * P + side * 6.5; q.z = p.z; }
   q.on = true;
@@ -2384,8 +2430,7 @@ const PRESETS = [
   ['★ 中心軸の駅（見上げる）', () => go(STRIP_PHI[0] + 0.25, HUB_Z - 700, 120, 0, 1.0)],
   ['★ 中心軸の駅（間近）', () => go(STRIP_PHI[0] + 0.62, HUB_Z - 750, R - 520, 0.35, 0.42)],
   ['★ 無重力パーク（中心軸）', () => go(STRIP_PHI[0], ZG_Z - 600, R - 330, 0, 0.45)],
-  ['★ 逆さ滝', () => { const f = LM.fountain; go(STRIP_PHI[f.k] + (f.s - 330) / R, f.z - 120, EYE, Math.PI / 2 - 0.3, 0.55); }],
-  ['★ リング大観覧車', () => { const w = LM.wheel; go(w.th + 0.02, BRIDGE_Z[3] + 600, 60, Math.PI + 0.12, 0.35); }],
+  ['★ リング大観覧車と遊園地', () => go(STRIP_PHI[1] + 1150 / R, BRIDGE_Z[3] - 380, 45, 0.55, 0.2)],
   ['宇宙港の出口（船の航路）', () => go(STRIP_PHI[0] + 0.2, -HL + 450, R - 360, 0.1, 0.12)],
 ];
 const warp = document.getElementById('warp');
