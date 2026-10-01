@@ -793,6 +793,7 @@ function build() {
 
   buildElevators();
   buildLandmarks();
+  buildHubStation();
 
   // 中心軸の構造物
   const spine = new THREE.Mesh(new THREE.CylinderGeometry(14, 14, L, 16, 1, true).rotateX(Math.PI / 2), M.steel);
@@ -1009,6 +1010,102 @@ const OMEGA = Math.sqrt(9.8 / R);                    // 約0.057 rad/s（約110�
 
 // ===== 観光名所: 無重力パーク・逆さ滝・リング大観覧車 =====
 const ZG_Z = 2500;                                    // 無重力パークの軸方向の位置
+
+// ===== 中心軸の駅: 軸を包む構造物の塊（スズメバチの巣のよう）＋地面へ伸びるスポーク状のエレベーター＋ネオン看板 =====
+const HUB_Z = -500;
+const HUB_SPOKES = [];
+for (let k = 0; k < 3; k++) for (const d of [-0.25, 0.25]) HUB_SPOKES.push(STRIP_PHI[k] + d);   // 陸地ごとに2本、計6本
+let hubCabMesh, hubNeonMat, hubStripMat;
+function buildHubStation() {
+  // 巣: 内側は軸の電車が通るので空け（半径80m〜240m）、外ほど低く・端ほど細る塊
+  const cells = [], pipes = [];
+  const cols = [0x4a4e55, 0x3d4147, 0x5a4a3d, 0x62676e, 0x4a3f37, 0x70757c, 0x34383e, 0x56483c, 0x2e5a66, 0x6a3a3a];
+  for (let i = 0; i < 520; i++) {
+    const zz = rr(-1, 1), z = HUB_Z + Math.sign(zz) * Math.pow(Math.abs(zz), 1.4) * 260;
+    const taper = 1 - Math.pow(Math.abs(z - HUB_Z) / 280, 2);
+    const rOut = 90 + (150 * taper) * rr(0.55, 1);            // 外側の半径
+    const ht = rr(14, 45);                                     // 軸方向へ伸びる厚み
+    if (rOut - ht < 80) continue;
+    cells.push(rand() * TAU, z, R - rOut, rr(14, 55), ht, rr(14, 60), pick(cols));
+  }
+  // 巣と巣をつなぐ配管
+  for (let i = 0; i < 90; i++) pipes.push(rand() * TAU, HUB_Z + rr(-240, 240), R - rr(110, 230), 2.5, 2.5, rr(60, 200), 0x8a8f96);
+  // 巣の両端の円盤状の駅本体（プラットフォーム）
+  for (const dz of [-275, 275]) for (let i = 0; i < 24; i++) cells.push(i / 24 * TAU, HUB_Z + dz, R - 150, 45, 70, 12, 0x9aa0a8);
+  scene.add(instanced(GEO.box, M.bld, cells, 7, { cast: false }));
+  scene.add(instanced(GEO.box, M.bld, pipes, 7, { cast: false }));
+
+  // スポーク（エレベーターのシャフト）: 巣の外側から地面まで。トラス風に柱4本＋横材
+  const posts = [], braces = [], bases = [], strips = [];
+  for (const th of HUB_SPOKES) {
+    const top = R - 230;
+    for (const [ds, dz] of [[-9, -9], [9, -9], [-9, 9], [9, 9]]) posts.push(th + ds / R, HUB_Z + dz, 0, 2.2, top, 2.2);
+    for (let h = 60; h < top; h += 60) { braces.push(th, HUB_Z - 9, h, 20, 1.2, 1.2); braces.push(th, HUB_Z + 9, h, 20, 1.2, 1.2); braces.push(th - 9 / R, HUB_Z, h + 30, 1.2, 1.2, 20); braces.push(th + 9 / R, HUB_Z, h + 30, 1.2, 1.2, 20); }
+    for (const dz of [-11, 11]) strips.push(th, HUB_Z + dz, 0, 1, top, 0.6);                    // 光る帯
+    bases.push(th, HUB_Z, 0, 60, 26, 60, 0xb8bec6);                                               // 地上駅
+    bases.push(th, HUB_Z, 26, 40, 8, 40, 0x8a9099);
+  }
+  const trussM = patch(new THREE.MeshStandardMaterial({ color: 0xc8ccd2, roughness: 0.45, metalness: 0.5 }));
+  scene.add(instanced(GEO.box, trussM, posts, 6, { color: false, cast: false }));
+  scene.add(instanced(GEO.box, trussM, braces, 6, { color: false, cast: false }));
+  scene.add(instanced(GEO.box, M.bld, bases, 7, { cast: false }));
+  hubStripMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.2, 1.2, 1.6) });
+  scene.add(instanced(GEO.box, hubStripMat, strips, 6, { color: false, cast: false }));
+  // かご（各スポークに上り下り2台ずつ）
+  hubCabMesh = new THREE.InstancedMesh(GEO.box, patch(new THREE.MeshStandardMaterial({ color: 0xf2f4f6, roughness: 0.3, metalness: 0.3, emissive: 0xffc8f0, emissiveIntensity: 0.6 })), HUB_SPOKES.length * 2);
+  hubCabMesh.frustumCulled = false;
+  scene.add(hubCabMesh);
+
+  // ネオン看板（蛍光色の文字を1枚の画像にまとめ、板に貼って巣の表面や柱にくっつける）
+  const texts = [['コロニー中央駅', '#7ff9ff'], ['ZERO-G', '#ff4fd8'], ['ラーメン', '#ff5a3c'], ['HOTEL 無重力', '#b6ff4a'], ['居酒屋', '#ffcc33'], ['カラオケ', '#ff4fd8'],
+    ['回転寿司', '#7ff9ff'], ['BAR', '#ff5a3c'], ['CYBER', '#4ab0ff'], ['薬', '#4dff9c'], ['24H', '#ffcc33'], ['まんが喫茶', '#b6ff4a'], ['NEON', '#ff4fd8'], ['スシ', '#7ff9ff'], ['質', '#ffcc33'], ['宇宙港直通', '#4ab0ff']];
+  const [ac, ag] = canvas(1024, 1024);
+  ag.clearRect(0, 0, 1024, 1024);
+  texts.forEach(([t, c], i) => {
+    const x = (i % 4) * 256, y = Math.floor(i / 4) * 256;
+    ag.fillStyle = 'rgba(8,6,16,0.85)'; ag.fillRect(x + 8, y + 64, 240, 128);
+    ag.strokeStyle = c; ag.lineWidth = 5; ag.shadowColor = c; ag.shadowBlur = 18; ag.strokeRect(x + 14, y + 70, 228, 116);
+    ag.fillStyle = c; ag.font = `bold ${t.length > 5 ? 34 : 52}px "Hiragino Sans", sans-serif`; ag.textAlign = 'center'; ag.textBaseline = 'middle';
+    ag.fillText(t, x + 128, y + 128); ag.shadowBlur = 0;
+    ag.fillStyle = '#ffffff'; ag.globalAlpha = 0.55; ag.fillText(t, x + 128, y + 128); ag.globalAlpha = 1;
+  });
+  const atlas = new THREE.CanvasTexture(ac); atlas.colorSpace = THREE.SRGBColorSpace; atlas.anisotropy = ANISO;
+  const geos = [];
+  const addSign = (th, z, r, w, kind) => {
+    const i = Math.floor(rand() * texts.length), u0 = (i % 4) / 4, v0 = 1 - (Math.floor(i / 4) + 1) / 4;
+    const g = new THREE.PlaneGeometry(w, w / 2);
+    const uv = g.attributes.uv;
+    for (let n = 0; n < uv.count; n++) uv.setXY(n, u0 + uv.getX(n) * 0.25, v0 + (0.25 + uv.getY(n) * 0.5) * 0.25);
+    if (kind === 'down') g.rotateX(Math.PI / 2);              // 地面を向く（下から見上げて読める）
+    else if (kind === 'side') g.rotateY(rand() < 0.5 ? 0 : Math.PI).translate(0, -w / 4, 0); // 軸方向を向く
+    else g.rotateY(Math.PI / 2 * (rand() < 0.5 ? 1 : -1));    // 周方向を向く
+    g.applyMatrix4(frameAt(th)); g.translate(...cyl(r, th, z).toArray());
+    geos.push(g);
+  };
+  for (let i = 0; i < 220; i++) {
+    const zz = rr(-1, 1), z = HUB_Z + zz * 250, taper = 1 - zz * zz;
+    addSign(rand() * TAU, z, 92 + 150 * taper * rr(0.6, 1.08), rr(28, 70), rand() < 0.55 ? 'down' : rand() < 0.5 ? 'side' : 'east');
+  }
+  for (const th of HUB_SPOKES) for (let h = 250; h < R - 400; h += rr(180, 420)) addSign(th, HUB_Z + (rand() < 0.5 ? -12 : 12), R - h, rr(18, 30), 'side');   // スポークの柱
+  for (const th of HUB_SPOKES) addSign(th, HUB_Z - 31, R - 30, 44, 'side');                                                                          // 地上駅
+  hubNeonMat = new THREE.MeshBasicMaterial({ map: atlas, transparent: true, side: THREE.DoubleSide, depthWrite: false, color: new THREE.Color(2.2, 2.2, 2.2) });
+  const neon = new THREE.Mesh(mergeGeometries(geos), hubNeonMat); neon.renderOrder = 2;
+  scene.add(neon);
+}
+function updateHubStation(t) {
+  const a = hubCabMesh.instanceMatrix.array, top = R - 260;
+  HUB_SPOKES.forEach((th, i) => {
+    for (let c = 0; c < 2; c++) {
+      const u = (t / 90 + i * 0.37 + c * 0.5) % 1;
+      const q = u < 0.45 ? u / 0.45 : u < 0.5 ? 1 : u < 0.95 ? 1 - (u - 0.5) / 0.45 : 0;
+      writeBox(a, (i * 2 + c) * 16, th + (c ? 4.5 : -4.5) / R, HUB_Z, 30 + (top - 30) * q * q * (3 - 2 * q), 8, 12, 14);
+    }
+  });
+  hubCabMesh.instanceMatrix.needsUpdate = true;
+  const n = U.uNight.value, flick = 0.92 + 0.08 * Math.sin(t * 31) * Math.sin(t * 7.3);
+  hubNeonMat.color.setScalar((3.5 + 3.5 * n) * flick);
+  hubStripMat.color.setRGB(0.2 + 0.6 * n, 1.2 + 2.5 * n, 1.6 + 4 * n);
+}
 const LM = {};
 function frameAt(th) {                                // 円筒上の局所フレーム（x=東, y=上, z=北）の回転行列
   return new THREE.Matrix4().makeBasis(new THREE.Vector3(-Math.sin(th), Math.cos(th), 0), new THREE.Vector3(-Math.cos(th), -Math.sin(th), 0), new THREE.Vector3(0, 0, 1));
@@ -1782,9 +1879,9 @@ function buildShips() {
   const navGeo = new THREE.SphereGeometry(1, 6, 4);
 
   const kinds = [
-    { geo: cargoGeo, len: 280, n: 6, speed: [45, 65], lane: [210, 300], nav: [[-17, 0, 118], [17, 0, 118], [0, 18, -100]] },
-    { geo: linerGeo, len: 175, n: 7, speed: [70, 95], lane: [120, 190], stripe: [27, 110, 13.5], nav: [[-21, 0, -52], [21, 0, -52], [0, 30, -50]], windows: true },
-    { geo: shuttleGeo, len: 30, n: 14, speed: [120, 180], lane: [55, 110], stripe: [9.4, 20, 3.2], nav: [[-10, 0, -6], [10, 0, -6], [0, 4, 9]] },
+    { geo: cargoGeo, len: 280, n: 6, speed: [45, 65], lane: [290, 360], nav: [[-17, 0, 118], [17, 0, 118], [0, 18, -100]] },
+    { geo: linerGeo, len: 175, n: 7, speed: [70, 95], lane: [272, 330], stripe: [27, 110, 13.5], nav: [[-21, 0, -52], [21, 0, -52], [0, 30, -50]], windows: true },
+    { geo: shuttleGeo, len: 30, n: 14, speed: [120, 180], lane: [265, 340], stripe: [9.4, 20, 3.2], nav: [[-10, 0, -6], [10, 0, -6], [0, 4, 9]] },
   ];
   for (const k of kinds) for (let i = 0; i < k.n; i++) {
     const grp = new THREE.Group();
@@ -2284,6 +2381,8 @@ const PRESETS = [
   ['超高層ビルの屋上', () => { const t = landmarks.tallest[0]; go(STRIP_PHI[0] + t.s / R, t.z + t.d / 2 - 1, t.h + 3, 0, -0.3); }],
   ['上空 1500m', () => go(STRIP_PHI[0], -2000, 1500, 0, -0.05)],
   ['中心軸のそば（無重力帯）', () => go(STRIP_PHI[0], -HL + 1200, R - 80, 0, 0)],
+  ['★ 中心軸の駅（見上げる）', () => go(STRIP_PHI[0] + 0.25, HUB_Z - 700, 120, 0, 1.0)],
+  ['★ 中心軸の駅（間近）', () => go(STRIP_PHI[0] + 0.62, HUB_Z - 750, R - 520, 0.35, 0.42)],
   ['★ 無重力パーク（中心軸）', () => go(STRIP_PHI[0], ZG_Z - 600, R - 330, 0, 0.45)],
   ['★ 逆さ滝', () => { const f = LM.fountain; go(STRIP_PHI[f.k] + (f.s - 330) / R, f.z - 120, EYE, Math.PI / 2 - 0.3, 0.55); }],
   ['★ リング大観覧車', () => { const w = LM.wheel; go(w.th + 0.02, BRIDGE_Z[3] + 600, 60, Math.PI + 0.12, 0.35); }],
@@ -2361,6 +2460,7 @@ function frame() {
   updateShips(elapsed);
   updateElevators(elapsed);
   updateLandmarks(elapsed);
+  updateHubStation(elapsed);
   updateAxisTrains(elapsed);
   updateLocalLife(dt, elapsed);
   updateBirds(dt, elapsed);
