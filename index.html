@@ -73,7 +73,7 @@ const zCenter = j => (j - (NZ - 1) / 2) * P;
 const BRIDGE_Z = [];
 for (let j = 6; j < NZ - 1; j += 10) BRIDGE_Z.push(zCenter(j) + P / 2);
 const RIVER_I = [7, 20, 10];
-const RESORT = { k: 1, i0: NS - 6, j0: 31, j1: 42 };   // 観覧車と遊園地のエリア（第2陸地の東端）
+const RESORT = { k: 1, i0: NS - 6, j0: 35, j1: 42 };   // 観覧車と遊園地のエリア（第2陸地の東端）
 
 function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const rand = mulberry32(20261001);
@@ -530,7 +530,7 @@ function genStrip(k) {
     blockTypes[k][i * NZ + j] = type;
 
     if (type === 'resort') {                          // 駐車場（アスファルト）とレジャー施設の舗装・植え込み
-      const lot = j <= RESORT.j0 + 3 && i <= NS - 3;
+      const lot = j === 36 && (i === NS - 4 || i === NS - 3);   // 駅前の2ブロックだけ駐車場
       rect(lot ? '#3f4247' : '#cbbfa8', s, z, BLK + 6, BLK + 6);
       if (!lot) { rect('#7aa05a', s, z, BLK * 0.5, BLK * 0.5); for (let n = 0; n < 10; n++) { const e = rand() < 0.5, a = rr(-0.45, 0.45) * BLK, b = (rand() < 0.5 ? -1 : 1) * 0.45 * BLK; addTree(ch, s + (e ? a : b), z + (e ? b : a), rr(7, 11)); } }
       continue;
@@ -1210,7 +1210,7 @@ function buildLandmarks() {
 
   // --- 3. リング大観覧車: 窓の上の橋のわきに立つ直径240mの観覧車。てっぺんから足元のガラス越しに宇宙が見える
   {
-    const zb = BRIDGE_Z[3], th = STRIP_PHI[1] + 1460 / R, zw = zb + 230;
+    const zb = BRIDGE_Z[3], th = STRIP_PHI[1] + 1470 / R, zw = zb + 300;
     LM.wheel = { th, zb };
     const root = new THREE.Group();
     root.applyMatrix4(frameAt(th)); root.position.copy(cyl(R, th, zw));
@@ -1257,7 +1257,7 @@ function buildResort(zb) {
   bld.push(thS(990), zb + 260, 0, 50, 140, 40, 0xd8d2c4, thS(990), zb + 260, 140, 30, 12, 26, 0xc0392b);   // ホテル（屋上の赤い看板塔）
   bld.push(thS(1010), zb + 470, 0, 70, 70, 45, 0x9aa3ad, thS(990), zb + 640, 0, 45, 95, 45, 0x6c8298);
   bld.push(thS(1000), zb + 80, 0, 70, 22, 60, 0xe6dccb);                                              // ショッピングモール
-  bld.push(thS(1150), zb - 30, 0, 110, 14, 24, 0xe8e8e8);                                              // 駅舎（高架の下）
+  bld.push(thS(1150), zb + 30, 0, 110, 14, 24, 0xe8e8e8);                                              // 駅舎（高架のすぐ北、遊園地の入口）
   scene.add(instanced(GEO.box, M.bld, bld, 7, { cast: true }));
   // 駅: 環状高架（高さ16m）の両側にホームと屋根
   for (const dz of [-8, 8]) misc.push(thS(1150), zb + dz, 14.5, 150, 1.5, 6, 0xbfbcb5);
@@ -1265,8 +1265,8 @@ function buildResort(zb) {
   for (let x = -70; x <= 70; x += 20) for (const dz of [-10.5, 10.5]) misc.push(thS(1150 + x), zb + dz, 0, 0.8, 23, 0.8, 0x8a8f96);
   // 駐車場: 白線と停まっている車
   const lots = [];
-  for (let row = 0; row < 9; row++) for (let c = 0; c < 40; c++) {
-    const s = 960 + c * 6.5, z = zb - 520 + row * 32;
+  for (let row = 0; row < 3; row++) for (let c = 0; c < 30; c++) {
+    const s = 1112 + c * 6.5 + (c >= 15 ? 12 : 0), z = zb - 90 + row * 32;
     misc.push(thS(s - 3.25), z, 0.02, 0.15, 0.05, 5.5, 0xf0f0f0);
     if (rand() < 0.72) lots.push(thS(s), z + (row % 2 ? 1 : -1) * 0.2, 0, 1, 1, 1, pick(PAL.car));
   }
@@ -1279,7 +1279,7 @@ function buildResort(zb) {
   // 遊園地の屋台・テント（色とりどりの屋根）
   const tents = [], tc = [0xe8463a, 0xf2c230, 0x2f6fd8, 0x4caf50, 0xd8448a, 0xf08a24, 0xffffff];
   for (let n = 0; n < 40; n++) {
-    const s = rr(1080, 1420), z = zb + rr(360, 640), w = rr(6, 14), col = pick(tc);
+    const s = rr(1060, 1390), z = zb + rr(60, 280), w = rr(6, 12), col = pick(tc);
     misc.push(thS(s), z, 0, w, 3, w, 0xf2efe8);
     tents.push(thS(s), z, 3, w * 1.1, rr(3, 5), w * 1.1, col);
   }
@@ -1289,7 +1289,7 @@ function buildResort(zb) {
   const pts = [];
   for (let i = 0; i < 24; i++) {
     const a = i / 24 * TAU;
-    pts.push(new THREE.Vector3(Math.cos(a) * 130 + Math.sin(a * 2) * 40, 8 + 22 * (1 + Math.sin(a * 3 + 1)) + (i === 3 ? 30 : 0), Math.sin(a) * 110));
+    pts.push(new THREE.Vector3(Math.cos(a) * 85 + Math.sin(a * 2) * 25, 8 + 18 * (1 + Math.sin(a * 3 + 1)) + (i === 3 ? 22 : 0), Math.sin(a) * 60));
   }
   const curve = new THREE.CatmullRomCurve3(pts, true, 'catmullrom', 0.5);
   const coaster = new THREE.Group();
@@ -1298,7 +1298,7 @@ function buildResort(zb) {
   for (let i = 0; i < 60; i++) { const p = curve.getPoint(i / 60); const c = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.7, p.y, 6), sup); c.position.set(p.x, p.y / 2, p.z); coaster.add(c); }
   const cars = new THREE.InstancedMesh(new THREE.BoxGeometry(2.6, 1.6, 4).translate(0, 1.4, 0), paint(0x2f6fd8), 6);
   coaster.add(cars);
-  place(coaster, 1230, zb + 470);
+  place(coaster, 1230, zb + 200);
   // メリーゴーラウンド
   const merry = new THREE.Group();
   merry.add(new THREE.Mesh(new THREE.CylinderGeometry(14, 14, 1.2, 24).translate(0, 0.6, 0), paint(0xf2c230)));
@@ -1307,14 +1307,14 @@ function buildResort(zb) {
   const horses = new THREE.Group();
   for (let i = 0; i < 12; i++) { const h = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.6, 2.2), paint(pick(tc))); const a = i / 12 * TAU; h.position.set(Math.cos(a) * 10, 3, Math.sin(a) * 10); horses.add(h); }
   merry.add(horses);
-  place(merry, 1370, zb + 130);
+  place(merry, 1100, zb + 100);
   // フリーフォール（上下する座席の輪）
   const drop = new THREE.Group();
   drop.add(new THREE.Mesh(new THREE.CylinderGeometry(2.5, 3.5, 90, 12).translate(0, 45, 0), paint(0xdfe3e8)));
   drop.add(new THREE.Mesh(new THREE.CylinderGeometry(6, 6, 4, 16).translate(0, 92, 0), paint(0xe8463a)));
   const seat = new THREE.Mesh(new THREE.CylinderGeometry(6, 6, 2.5, 16), paint(0xf2c230));
   drop.add(seat);
-  place(drop, 1100, zb + 160);
+  place(drop, 1370, zb + 90);
   LM.resort = { coaster: { curve, cars }, horses, seat };
 }
 function updateResort(t) {
@@ -2497,7 +2497,7 @@ const PRESETS = [
   ['★ 中心軸の駅（間近）', () => go(STRIP_PHI[0] + 0.62, HUB_Z - 750, R - 520, 0.35, 0.42)],
   ['★ 無重力パーク駅（電車が止まる）', () => go(STRIP_PHI[0] + 0.45, ZG_Z - 330, R - 130, 0.15, 0.25)],
   ['★ 無重力パーク（中心軸）', () => go(STRIP_PHI[0], ZG_Z - 600, R - 330, 0, 0.45)],
-  ['★ リング大観覧車と遊園地', () => go(STRIP_PHI[1] + 1150 / R, BRIDGE_Z[3] - 380, 45, 0.55, 0.2)],
+  ['★ リング大観覧車と遊園地', () => go(STRIP_PHI[1] + 1100 / R, BRIDGE_Z[3] - 330, 50, 0.45, 0.22)],
   ['宇宙港の出口（船の航路）', () => go(STRIP_PHI[0] + 0.2, -HL + 450, R - 360, 0.1, 0.12)],
 ];
 const warp = document.getElementById('warp');
