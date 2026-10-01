@@ -37,6 +37,7 @@
   #sns-bot .x { font-size: 0.50em; font-weight: 700; line-height: 1.5; padding: 0 0.5em; }
   #sns-top > *, #sns-bot > * { transition: opacity 0.5s; }
   .sns #demo-cap, .sns #demo-bar, .sns .panel { display: none !important; }
+  .rec #sns-top > *, .rec #sns-bot > *, .rec #demo-fade { transition: none !important; }
   html.sns, html.sns body { background: #111; }
   #demo-fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; transition: opacity 0.8s; }
   #demo-bar { position: fixed; right: 16px; bottom: 10px; color: #c8d4e2; font-size: 12px; background: rgba(6,10,20,0.65); padding: 4px 6px 4px 10px; border-radius: 8px; display: flex; align-items: center; gap: 6px; }
@@ -82,6 +83,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
 const LOW = new URLSearchParams(location.search).get('q') === 'low';
+const REC = new URLSearchParams(location.search).has('rec');   // 動画の書き出し用。window.__frame(dt) で1コマずつ進める
 
 // ===== コロニー寸法（メートル）。軸は Z、遠心「重力」は軸から外向き =====
 const R = 3000, L = 16000, HL = L / 2;
@@ -128,7 +130,7 @@ const boxMatrix = (th, z, h0, w, ht, d) => { writeBox(_m.elements, 0, th, z, h0,
 const cyl = (r, th, z) => new THREE.Vector3(r * Math.cos(th), r * Math.sin(th), z);
 
 // ===== レンダラ =====
-const renderer = new THREE.WebGLRenderer({ antialias: false, logarithmicDepthBuffer: true, powerPreference: 'high-performance' });
+const renderer = new THREE.WebGLRenderer({ preserveDrawingBuffer: REC, antialias: false, logarithmicDepthBuffer: true, powerPreference: 'high-performance' });
 renderer.domElement.id = 'view';
 renderer.setPixelRatio(Math.min(devicePixelRatio, LOW ? 1 : 1.5));
 // ?sns: スマホ縦長（9:16）のダイジェスト版。上下に黒帯（上=街区名、下=解説）
@@ -1173,6 +1175,7 @@ function build() {
   buildElevators();
   buildLandmarks();
   buildHubStation();
+  buildShipyards();
 
   // 中心軸の構造物
   const spine = new THREE.Mesh(new THREE.CylinderGeometry(14, 14, L, 16, 1, true).rotateX(Math.PI / 2), M.steel);
@@ -1401,6 +1404,84 @@ const OMEGA = Math.sqrt(9.8 / R);                    // 約0.057 rad/s（約110�
 
 // ===== 観光名所: 無重力パーク・逆さ滝・リング大観覧車 =====
 const ZG_Z = 2500;                                    // 無重力パークの軸方向の位置
+// 軸ぞいの並び: 宇宙港（-z 端）→ 新造船所（NEW_YARD_Z）→ 旧造船所＝今の中央駅（HUB_Z）→ 無重力パーク（ZG_Z）
+const NEW_YARD_Z = -4300;
+const yard = { sparks: [], ship: null };
+// 造りかけの船体: 竜骨・肋骨（四角い枠）・前から一部だけ張った外板。長さ len、軸は +z
+function hullSkeleton(len, wid, ribCol, plateCol, plated) {
+  const parts = [], n = Math.floor(len / 12);
+  parts.push(vcol(new THREE.BoxGeometry(3, 3, len), new THREE.Color(ribCol).toArray()));
+  for (let i = 0; i <= n; i++) {
+    const z = -len / 2 + i * len / n, w = wid * (1 - Math.pow(Math.abs(i / n - 0.5) * 2, 3) * 0.5), c = new THREE.Color(ribCol).toArray();
+    parts.push(vcol(new THREE.BoxGeometry(w, 1.2, 1.2).translate(0, w / 2, z), c), vcol(new THREE.BoxGeometry(w, 1.2, 1.2).translate(0, -w / 2, z), c));
+    parts.push(vcol(new THREE.BoxGeometry(1.2, w, 1.2).translate(w / 2, 0, z), c), vcol(new THREE.BoxGeometry(1.2, w, 1.2).translate(-w / 2, 0, z), c));
+    if (i / n > 1 - plated) {                             // 前の方だけ外板を張り終えている
+      const p = new THREE.Color(plateCol).toArray(), L = len / n + 0.4;
+      parts.push(vcol(new THREE.BoxGeometry(w + 1, 0.6, L).translate(0, w / 2 + 0.6, z - len / n / 2), p), vcol(new THREE.BoxGeometry(w + 1, 0.6, L).translate(0, -w / 2 - 0.6, z - len / n / 2), p));
+      parts.push(vcol(new THREE.BoxGeometry(0.6, w + 1, L).translate(w / 2 + 0.6, 0, z - len / n / 2), p), vcol(new THREE.BoxGeometry(0.6, w + 1, L).translate(-w / 2 - 0.6, 0, z - len / n / 2), p));
+    }
+  }
+  return mergeGeometries(parts);
+}
+function buildShipyards() {
+  const steel = patch(new THREE.MeshStandardMaterial({ color: 0xc8ccd2, roughness: 0.45, metalness: 0.5 }));
+  const vmat = patch(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.4 }));
+  // --- 新造船所: 軸を囲む骨組みのかご（半径230m・長さ520m）。中で船を2隻組み立て中。完成した船が宇宙港へ出ていく
+  const g = new THREE.Group(); g.position.z = NEW_YARD_Z;
+  for (let z = -260; z <= 260; z += 104) g.add(new THREE.Mesh(new THREE.TorusGeometry(230, 3.5, 6, 96).translate(0, 0, z), steel));
+  for (let i = 0; i < 16; i++) { const a = i / 16 * TAU, b = new THREE.Mesh(new THREE.BoxGeometry(5, 5, 520), steel); b.position.set(Math.cos(a) * 230, Math.sin(a) * 230, 0); g.add(b); }
+  for (const z of [-260, 260]) for (let i = 0; i < 8; i++) {                // 両端の内側へ向かう支え（軸の構造に固定）
+    const a = (i + 0.5) / 8 * TAU, b = new THREE.Mesh(new THREE.BoxGeometry(170, 3, 3).translate(145, 0, z), steel); b.rotation.z = a; g.add(b);
+  }
+  const hull = hullSkeleton(200, 30, 0x9aa0a8, 0x2f6fd8, 0.45), hull2 = hullSkeleton(150, 24, 0x9aa0a8, 0xe8463a, 0.2);
+  for (const [geo, a, r] of [[hull, 0.75, 140], [hull2, 0.75 + Math.PI, 150]]) {
+    const m = new THREE.Mesh(geo, vmat); m.position.set(Math.cos(a) * r, Math.sin(a) * r, 0); g.add(m);
+    for (const dz of [-60, 0, 60]) { const arm = new THREE.Mesh(new THREE.BoxGeometry(230 - r, 2.2, 2.2).translate((230 - r) / 2, 0, 0), new THREE.MeshStandardMaterial({ color: 0xf2c230 })); arm.position.set(Math.cos(a) * r, Math.sin(a) * r, dz); arm.rotation.z = a; g.add(arm); } // 船を支えるアーム
+    for (let k = 0; k < 14; k++) yard.sparks.push({ p: new THREE.Vector3(Math.cos(a) * r + rr(-14, 14), Math.sin(a) * r + rr(-14, 14), NEW_YARD_Z + rr(-90, 90)), ph: rand() * 10 });
+  }
+  // 投光器の光の点（かごの輪に沿って）
+  const lp = []; for (let z = -260; z <= 260; z += 104) for (let i = 0; i < 32; i++) { const a = i / 32 * TAU; lp.push(Math.cos(a) * 226, Math.sin(a) * 226, z); }
+  const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute(lp, 3));
+  g.add(new THREE.Points(lg, new THREE.PointsMaterial({ color: new THREE.Color(5, 4.4, 3.2), size: 3, sizeAttenuation: false })));
+  scene.add(g);
+  // 溶接の火花（青白く明滅）
+  const sg = new THREE.BufferGeometry(); sg.setAttribute('position', new THREE.Float32BufferAttribute(yard.sparks.flatMap(s => s.p.toArray()), 3));
+  yard.sparkMat = new THREE.PointsMaterial({ color: new THREE.Color(6, 7, 10), size: 5, sizeAttenuation: false, transparent: true });
+  yard.sparkPts = new THREE.Points(sg, yard.sparkMat); yard.sparkPts.frustumCulled = false; scene.add(yard.sparkPts);
+  // 完成した船（造船所を出て宇宙港の発着口へ向かう）
+  const parts = [vcol(new THREE.CylinderGeometry(15, 15, 140, 18).rotateX(Math.PI / 2), [0.95, 0.95, 0.97]), vcol(new THREE.SphereGeometry(15, 16, 10).scale(1, 1, 2).translate(0, 0, 70), [0.95, 0.95, 0.97]),
+    vcol(new THREE.BoxGeometry(31, 4, 120).translate(0, 0, -5), [0.18, 0.44, 0.85]), vcol(new THREE.BoxGeometry(10, 12, 24).translate(0, 16, 30), [0.85, 0.87, 0.9])];
+  yard.ship = new THREE.Mesh(mergeGeometries(parts), vmat); scene.add(yard.ship);
+  // 船首のリボン（進水を祝う）
+  const rib = new THREE.Mesh(new THREE.TorusGeometry(15.5, 1.2, 6, 24), new THREE.MeshBasicMaterial({ color: new THREE.Color(2.5, 0.3, 0.3) })); rib.position.z = 40; yard.ship.add(rib);
+
+  // --- 旧造船所の名残（今の中央駅）: 錆びた巨大クレーン2基、古い船台のリング、保存された造りかけの船体
+  const rust = patch(new THREE.MeshStandardMaterial({ color: 0x9a5a36, roughness: 0.9, metalness: 0.2 }));
+  for (const [a, dz] of [[0.9, -170], [0.9 + Math.PI, 160]]) {
+    const c = new THREE.Group(); c.position.z = HUB_Z + dz; c.rotation.z = a;
+    c.add(new THREE.Mesh(new THREE.BoxGeometry(180, 9, 9).translate(240 + 90, 0, 0), rust));        // 外へ張り出した腕
+    c.add(new THREE.Mesh(new THREE.BoxGeometry(9, 9, 120).translate(410, 0, -50), rust));            // 腕の先の吊り桁
+    c.add(new THREE.Mesh(new THREE.BoxGeometry(3, 3, 70).translate(410, 0, -140), new THREE.MeshStandardMaterial({ color: 0x3a3a3a })));
+    scene.add(c);
+  }
+  for (const dz of [-330, 330]) scene.add(new THREE.Mesh(new THREE.TorusGeometry(250, 6, 6, 96).translate(0, 0, HUB_Z + dz), rust));   // 古い船台のリング
+  const relic = new THREE.Mesh(hullSkeleton(120, 26, 0x8a5a3a, 0x6a4a3a, 0.15), patch(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 })));
+  relic.position.set(Math.cos(2.3) * 150, Math.sin(2.3) * 150, HUB_Z + 380); scene.add(relic);   // 最初に造られた船の骨組み（記念に保存）
+}
+function updateShipyards(t) {
+  // 火花: ランダムに明滅
+  const pos = yard.sparkPts.geometry.attributes.position;
+  yard.sparks.forEach((s, i) => { const on = Math.sin(t * 23 + s.ph * 7) > 0.6; pos.setXYZ(i, on ? s.p.x : 0, on ? s.p.y : 0, on ? s.p.z : 1e7); });
+  pos.needsUpdate = true;
+  // 完成した船: 90秒周期。造船所で待機 → 外へ移って発着口の高さへ → 宇宙港へ進む → 発着口で消える
+  const u = (t % 90) / 90, a0 = 0.75 + Math.PI / 2, bay = 0.5 / 12 * TAU, s = yard.ship;
+  let r, a, z, vis = true;
+  if (u < 0.25) { r = 150; a = a0; z = NEW_YARD_Z; }
+  else if (u < 0.4) { const q = (u - 0.25) / 0.15, e = q * q * (3 - 2 * q); r = 150 + 150 * e; a = a0 + (bay - a0) * e; z = NEW_YARD_Z - 300 * e; }
+  else if (u < 0.85) { const q = (u - 0.4) / 0.45, e = q * q * (3 - 2 * q); r = 300; a = bay; z = NEW_YARD_Z - 300 + (-HL + 330 - NEW_YARD_Z + 300) * e; }
+  else { vis = false; r = 300; a = bay; z = -HL + 330; }
+  s.visible = vis; s.position.set(Math.cos(a) * r, Math.sin(a) * r, z); s.rotation.set(0, Math.PI, 0);
+}
 
 // ===== 中心軸の駅: 軸を包む構造物の塊（スズメバチの巣のよう）＋地面へ伸びるスポーク状のエレベーター＋ネオン看板 =====
 const HUB_Z = -500;
@@ -1457,7 +1538,7 @@ function buildHubStation() {
 
   // ネオン看板（蛍光色の文字を1枚の画像にまとめ、板に貼って巣の表面や柱にくっつける）
   const texts = [['コロニー中央駅', '#7ff9ff'], ['ZERO-G', '#ff4fd8'], ['ラーメン', '#ff5a3c'], ['HOTEL 無重力', '#b6ff4a'], ['居酒屋', '#ffcc33'], ['カラオケ', '#ff4fd8'],
-    ['回転寿司', '#7ff9ff'], ['BAR', '#ff5a3c'], ['CYBER', '#4ab0ff'], ['薬', '#4dff9c'], ['24H', '#ffcc33'], ['まんが喫茶', '#b6ff4a'], ['NEON', '#ff4fd8'], ['スシ', '#7ff9ff'], ['質', '#ffcc33'], ['宇宙港直通', '#4ab0ff']];
+    ['回転寿司', '#7ff9ff'], ['BAR', '#ff5a3c'], ['CYBER', '#4ab0ff'], ['薬', '#4dff9c'], ['24H', '#ffcc33'], ['まんが喫茶', '#b6ff4a'], ['NEON', '#ff4fd8'], ['スシ', '#7ff9ff'], ['旧造船所', '#ffcc33'], ['宇宙港直通', '#4ab0ff']];
   const [ac, ag] = canvas(1024, 1024);
   ag.clearRect(0, 0, 1024, 1024);
   texts.forEach(([t, c], i) => {
@@ -3227,6 +3308,13 @@ addEventListener('resize', () => {
 });
 
 // ===== ワープ =====
+// 位置 (th, z, h) から、ワールド座標の target を向くように yaw・pitch を決める
+function aimCam(th, z, h, target) {
+  const r = R - h, p = new THREE.Vector3(r * Math.cos(th), r * Math.sin(th), z), d = target.clone().sub(p);
+  const up = new THREE.Vector3(-Math.cos(th), -Math.sin(th), 0), east = new THREE.Vector3(-Math.sin(th), Math.cos(th), 0);
+  const de = d.dot(east), dn = d.z, du = d.dot(up);
+  go(th, z, h, Math.atan2(de, dn), Math.atan2(du, Math.hypot(de, dn)));
+}
 const go = (th, z, h, yaw, pitch) => { leaveSpace(); Object.assign(player, { th, z, h, yaw, pitch }); };
 const roadS = s => Math.round(s / P) * P + 6.5; // 最寄りの南北道路の歩道
 const PRESETS = [
@@ -3244,6 +3332,7 @@ const PRESETS = [
   ['★ 拡張境界地区（農業→工業→旧市街→新市街）', () => go(STRIP_PHI[0] - 200 / R, ZONE.farmEnd - 500, 260, 0, -0.32)],
   ['★ 旧市街と再開発予定地', () => { const r = landmarks.redev[0] || { s: 0, z: (ZONE.indEnd + ZONE.oldEnd) / 2 }; lookAt(0, r.s - 140, r.z - 160, r.s, r.z, 45, 0.85); }],
   ['★ 歓楽街', () => { const n = landmarks.neonSpot || landmarks.cbd[0][0]; go(STRIP_PHI[0] + (Math.round(n.s / P) * P + 6.5) / R, n.z - 150, 30, 0, 0.32); }],
+  ['★ 新造船所', () => aimCam(0.75 + 0.35, NEW_YARD_Z - 230, R - 330, new THREE.Vector3(Math.cos(0.75) * 140, Math.sin(0.75) * 140, NEW_YARD_Z))],
   ['★ 中心軸の駅（見上げる）', () => go(STRIP_PHI[0] + 0.25, HUB_Z - 700, 120, 0, 1.0)],
   ['★ 中心軸の駅（間近）', () => go(STRIP_PHI[0] + 0.62, HUB_Z - 750, R - 520, 0.35, 0.42)],
   ['★ 無重力パーク駅（電車が止まる）', () => go(STRIP_PHI[0] + 0.45, ZG_Z - 330, R - 130, 0.15, 0.25)],
@@ -3362,8 +3451,10 @@ const SHOTS = [
     from: preset('宇宙港の出口'), d: { z: 1600, yaw: -0.1, pitch: -0.05 } },
   { ch: '円筒の内側', t: '頭上にも街がある世界', x: '見上げると、反対側の陸地が空のかわりに広がっているのだ。遠くの街ほど空気に霞んで、地面が両側からせり上がっていく――ここが円筒の中だと実感できる眺めなのだ。', dur: 16,
     from: () => go(STRIP_PHI[0], -HL + 1800, R - 700, 0, -0.25), d: { z: 1200, pitch: 0.15 } },
-  { ch: '観光地', t: 'コロニー中央駅', x: '中心軸のちょうど真ん中に、構造物が蜂の巣のように寄り集まった中央駅があるのだ。地面からは自転車のスポークのように6本のエレベーターが伸び、ネオン看板と赤い警告灯がまたたく、コロニー随一の独特な景観なのだ。', dur: 16,
-    from: preset('中心軸の駅（間近）'), d: { yaw: 0.25, z: 120 } },
+  { ch: '観光地', t: '新造船所', x: 'このコロニーは、もともと無重力の工場として始まったのだ。今も軸のそばの新造船所では、重さのない空間で大きな船を効率よく組み立てているのだ。できあがった船は、軸ぞいを通って宇宙港から宇宙へ出ていくのだ。', dur: 15,
+    from: () => aimCam(0.75 + 0.35, NEW_YARD_Z - 230, R - 330, new THREE.Vector3(Math.cos(0.75) * 140, Math.sin(0.75) * 140, NEW_YARD_Z)), d: { z: 120 } },  // かごの外から組み立て中の船をねらう
+  { ch: '観光地', t: 'コロニー中央駅（旧造船所）', x: '中央駅は、昔は最初の造船所だったのだ。錆びた巨大クレーンや船台のリング、最初に造られた船の骨組みが今も残っているのだ。そのまわりに駅と店が増築を重ねて、蜂の巣のような姿になったのだ。', dur: 16,
+    from: () => go(STRIP_PHI[0] + 0.62, HUB_Z - 750, R - 520, 0.35, 0.42), d: { yaw: 0.25, z: 120 } },
   { ch: '観光地', t: '無重力パーク', x: '中心軸を包む直径500mのガラスの球なのだ。木の生えた浮島や水の玉のあいだを、人々が泳ぐように漂って遊んでいるのだ。軸の高速電車もここで止まるのだ。', dur: 15,
     from: preset('★ 無重力パーク（中心軸）'), d: { z: 200, pitch: -0.1 } },
   { ch: '街区', t: '都心のオフィス街', x: '高層ビルが立ち並ぶ都心なのだ。線路が交わるターミナル駅のまわりや、昔から栄えた場所にビルが集まっているのだ。窓の奥では今日も誰かが働いているのだ。', dur: 14,
@@ -3378,7 +3469,7 @@ const SHOTS = [
   { ch: '街区', t: '旧市街', x: '開拓者たちが最初に住んだ旧市街は、今では古いアパートがすき間なくひしめく貧民街になっているのだ。路地の先には、新市街のきれいな高層ビルがそびえているのだ。市は再開発を進めようとしているけど、「再開発反対」の横断幕を掲げる住民の反対にあって、話し合いは今も続いているのだ。', dur: 15,
     from: () => { const i = 16, sx = 4 * P + 6.5; go(STRIP_PHI[0] + sx / R, oldEndAt(0, i) - 520, 7, 0, 0.2); }, d: { z: 220, pitch: 0.06 } },   // 旧市街の路地から、境目の向こうの新市街の高層ビルを見上げる
   { ch: '街区', t: '寺社と鎮守の森', x: 'コロニーの人々は、地球から神様もいっしょに連れてきたのだ。朱色の鳥居と鎮守の森が、住宅地の中に静かにたたずんでいるのだ。', dur: 11, from: () => { const t = landmarks.samples.temple, n = t.ns || { s: t.s + 110, z: t.z }, dx = n.s - t.s, dz = n.z - t.z, L = Math.hypot(dx, dz) || 1; lookAt(t.k, t.s - dx / L * 120, t.z - dz / L * 120, t.s + dx * 0.5, t.z + dz * 0.5, 38, 0.7); }, d: { h: -6 } },  // 寺社の向こうに歓楽街
-  { ch: '街区', t: '工場と倉庫街', x: '宇宙港のある端の畑のすぐ奥には、コロニーの暮らしを支える工場や倉庫が集まっているのだ。宇宙港から運び込まれた資材を加工する、トラックが行き交う「街の裏側」なのだ。', dur: 11, from: atSample('factory', 55, 60), d: { z: 60, yaw: 0.15 } },
+  { ch: '街区', t: '工場と倉庫街', x: '造船の町として始まったネオ・ミヤギも、今は商業と観光の街なのだ。工場は宇宙港側の端に残るだけで、のこぎり屋根の工場や倉庫が並ぶ「街の裏側」になっているのだ。', dur: 11, from: atSample('factory', 55, 60), d: { z: 60, yaw: 0.15 } },
   { ch: '街区', t: '農業区画', x: '両端の蓋の近くには、畑とガラスの温室が広がっているのだ。最初の作物の枝豆もここで育ったのだ。300万人の食べ物の多くは、このコロニーの中で育てているのだ。', dur: 12, from: () => { const sp = landmarks.samples.farm; lookAt(sp.k, sp.s, sp.z - 80, sp.s, sp.z - 500, 55, 0.75); }, d: { z: -90, yaw: 0.12 } },   // 畑の中から蓋の方（一面の畑）を向く
   { ch: '観光地', t: '大きな公園', x: '街のところどころにある大きな公園なのだ。鳥が群れで旋回し、木々が風に揺れているのだ。空の代わりに見えるのは、反対側の街なのだ。', dur: 12, from: preset('大きな公園'), d: { z: 100, pitch: 0.1 } },
   { ch: '観光地', t: '窓の上を渡る橋', x: '陸地と陸地のあいだにある窓は、全面ガラスなのだ。その上を渡る橋からは、足元のガラス越しに宇宙が見えるのだ。', dur: 13, from: preset('橋の上'), d: { th: 0.04, pitch: -0.3 } },
@@ -3471,9 +3562,9 @@ function pad(t, notes, len) {                         // パッド: 少しずら
   for (const n of notes) for (const det of [-9, 9]) { const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = midi(n); o.detune.value = det; o.connect(f); o.start(t); o.stop(t + len + 0.6); }
   f.connect(g); g.connect(music.bus);
 }
-function scheduleMusic() {
+function scheduleMusic(until) {
   const ctx = audio.ctx, beat = 60 / 70;
-  while (music.next < ctx.currentTime + 0.4) {
+  while (music.next < (until ?? ctx.currentTime + 0.4)) {
     const t = music.next, st = music.step, bar = Math.floor(st / 8), [root, ch] = PROG[Math.floor(bar / 2) % PROG.length], e = st % 8;
     if (st % 16 === 0) pad(t, [ch[0], ch[2], ch[4]], beat * 8);
     if (e === 0) bass(t, root, beat * 1.8);
@@ -3485,6 +3576,24 @@ function scheduleMusic() {
     music.next += beat / 2; music.step++;
   }
 }
+// 動画用: BGM を sec 秒ぶん OfflineAudioContext で合成し、WAV を base64 で返す（最初と最後はフェード）
+async function renderMusicWav(sec) {
+  const sr = 44100, off = new OfflineAudioContext(2, Math.ceil(sr * sec), sr), keep = { ctx: audio.ctx, out: music.out, bus: music.bus, next: music.next, step: music.step };
+  audio.ctx = off; music.out = null; musicNodes(); music.next = 0.05; music.step = 0;
+  music.out.gain.setValueAtTime(0, 0); music.out.gain.linearRampToValueAtTime(0.8, 1.5); music.out.gain.setValueAtTime(0.8, sec - 2.5); music.out.gain.linearRampToValueAtTime(0, sec - 0.2);
+  scheduleMusic(sec);
+  const buf = await off.startRendering();
+  Object.assign(music, { out: keep.out, bus: keep.bus, next: keep.next, step: keep.step }); audio.ctx = keep.ctx;
+  const n = buf.length, data = new DataView(new ArrayBuffer(44 + n * 4)), ch = [buf.getChannelData(0), buf.getChannelData(1)];
+  const str = (o, t) => [...t].forEach((c, i) => data.setUint8(o + i, c.charCodeAt(0)));
+  str(0, 'RIFF'); data.setUint32(4, 36 + n * 4, true); str(8, 'WAVEfmt '); data.setUint32(16, 16, true); data.setUint16(20, 1, true); data.setUint16(22, 2, true);
+  data.setUint32(24, sr, true); data.setUint32(28, sr * 4, true); data.setUint16(32, 4, true); data.setUint16(34, 16, true); str(36, 'data'); data.setUint32(40, n * 4, true);
+  for (let i = 0; i < n; i++) for (let c = 0; c < 2; c++) data.setInt16(44 + (i * 2 + c) * 2, Math.max(-1, Math.min(1, ch[c][i])) * 32767, true);
+  let bin = ''; const u8 = new Uint8Array(data.buffer); for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode(...u8.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+window.__renderMusicWav = renderMusicWav;
+window.__snsDuration = () => SNS_SHOTS.reduce((a, s) => a + s.dur, 0);
 function setMusic(on) {
   if (!audio.ctx) startAudio();
   if (!audio.ctx) return;
@@ -3502,7 +3611,8 @@ function demoStartShot(i) {
   if (SNS) {                                         // 上下の帯の文字を切り替える
     const tp = el('sns-top'), bt = el('sns-bot');
     [tp, bt].forEach(e => [...e.children].forEach(c => c.style.opacity = 0));
-    setTimeout(() => { tp.querySelector('.ch').textContent = sh.ch; tp.querySelector('.t').textContent = sh.t; bt.querySelector('.x').innerHTML = sh.x.replace(/\n/g, '<br>'); [tp, bt].forEach(e => [...e.children].forEach(c => c.style.opacity = 1)); }, 300);
+    const put = () => { tp.querySelector('.ch').textContent = sh.ch; tp.querySelector('.t').textContent = sh.t; bt.querySelector('.x').innerHTML = sh.x.replace(/\n/g, '<br>'); [tp, bt].forEach(e => [...e.children].forEach(c => c.style.opacity = 1)); };
+    if (REC) put(); else setTimeout(put, 300);
   }
   demo.i = i; demo.t = 0;
   { const L = SHOTLIST(); let nt = 0; for (let k = 0; k <= i; k++) if (L[k].night !== undefined) nt = L[k].night;   // 場面までの昼夜の指定をたどる（飛ばしても合う）
@@ -3540,10 +3650,19 @@ function updateDemo(dt) {
   if (sh.fadeOut && demo.t > sh.dur - fadeLen && demoEl.fade.style.opacity !== '1') { demoEl.fade.style.background = sh.fadeColor || '#000'; demoEl.fade.style.transition = `opacity ${fadeLen - 0.2}s`; demoEl.fade.style.opacity = 1; }
   if (demo.t > sh.dur - 0.6) demoEl.cap.style.opacity = 0;
   if (demo.t >= sh.dur) demoStartShot((demo.i + 1) % SHOTLIST().length);
+  if (REC) {                                          // フェードをコマ単位で計算（CSS の時間に頼らない）
+    const c = SHOTLIST()[demo.i], fl = c.fadeColor === '#ffffff' ? 2.4 : 1.0;
+    let o = 0, col = c.fadeColor || '#000';
+    if (c.fadeOut && demo.t > c.dur - fl) o = (demo.t - (c.dur - fl)) / fl;
+    if (c.fadeIn && demo.t < 1.5) o = Math.max(o, 1 - demo.t / 1.5);
+    if (demo.i === 0 && demo.t < 1) { o = Math.max(o, 1 - demo.t); col = '#000'; }
+    const L = SHOTLIST(); if (demo.i === L.length - 1 && demo.t > c.dur - 1) { o = Math.max(o, (demo.t - (c.dur - 1))); col = '#000'; }
+    demoEl.fade.style.background = col; demoEl.fade.style.opacity = Math.min(1, o);
+  }
 }
 function startDemo() {
   demo.on = true; keys.clear(); setDemoPause(false);
-  setMusic(true);
+  if (!REC) setMusic(true);
   document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden'));
   demoEl.bar.classList.remove('hidden');
   demoStartShot(0);
@@ -3568,6 +3687,7 @@ el('demo-next').onclick = e => { e.currentTarget.blur(); demoStep(1); };
 el('demo-pause').onclick = e => { e.currentTarget.blur(); setDemoPause(!demo.paused); };
 el('demo-stop').onclick = () => stopDemo();
 addEventListener('keydown', e => {
+  if (demo.on && SNS) { startAudio(); setMusic(true); if (['Space', 'KeyG', 'Escape'].includes(e.code)) { setDemoPause(false); e.preventDefault(); e.stopImmediatePropagation(); return; } }   // SNS 版はキーで止めない（どのキーでも音が出るだけ）
   if (demo.on) {
     const act = { Escape: stopDemo, KeyG: stopDemo, Space: () => setDemoPause(!demo.paused), ArrowLeft: () => demoStep(-1), ArrowRight: () => demoStep(1) }[e.code];
     if (act) { act(); e.preventDefault(); e.stopImmediatePropagation(); }
@@ -3579,8 +3699,8 @@ renderer.domElement.addEventListener('pointerdown', () => { if (SNS) { startAudi
 // ===== 起動 =====
 const clock = new THREE.Clock();
 let elapsed = 0, frameNo = 0;
-function frame() {
-  const dt = Math.min(clock.getDelta(), 0.1);
+function frame(fixedDt) {
+  const dt = fixedDt ?? Math.min(clock.getDelta(), 0.1);
   elapsed += dt;
   updateDemo(dt);
   if (space.on) updateSpaceCamera(); else { if (!demo.on) updatePlayer(dt); updateCamera(); }
@@ -3591,6 +3711,7 @@ function frame() {
   updateElevators(elapsed);
   updateLandmarks(elapsed);
   updateHubStation(elapsed);
+  updateShipyards(elapsed);
   updateAxisTrains(elapsed);
   updateLocalLife(dt, elapsed);
   updateBirds(dt, elapsed);
@@ -3604,8 +3725,9 @@ function frame() {
   renderFrame(dt);
   drawMinimap();
   hud(dt);
-  requestAnimationFrame(frame);
+  if (!REC) requestAnimationFrame(() => frame());
 }
+window.__frame = dt => frame(dt);
 setTimeout(() => {
   build();
   makePost();
@@ -3613,8 +3735,9 @@ setTimeout(() => {
   PRESETS[0][1]();
   el('loading').classList.add('hidden');
   window.__ready = true; window.__demo = demo; window.__startDemo = startDemo; window.__demoShot = demoStartShot; window.__lm = landmarks; window.__demoTitle = n => SHOTLIST()[n] && SHOTLIST()[n].t; window.__player = player; window.__ships = ships; window.__trains = vehicles.trains; window.__night = toggleNight; window.__space = space; window.__toggleSpace = toggleSpace; window.__viewEntrance = viewEntrance; window.__extShips = extShips; window.__post = post; window.__t = () => elapsed; window.__scene = scene; window.__axis = () => axisCarMesh;
-  frame();
+  frame(REC ? 0 : undefined);
   if (SNS) document.documentElement.classList.add('sns');
+  if (REC) document.documentElement.classList.add('rec');
   if (new URLSearchParams(location.search).has('demo') || SNS) startDemo();
 }, 30);
 </script>
