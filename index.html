@@ -1555,6 +1555,8 @@ function updateShipyards(t) {
 const HUB_Z = -500;
 const HUB_SPOKES = [];
 for (let k = 0; k < 3; k++) for (const d of [-0.25, 0.25]) HUB_SPOKES.push(STRIP_PHI[k] + d);   // 陸地ごとに2本、計6本
+// スポーク状のエレベーターがある場所（軸ぞいの3か所）: 軸方向の位置と、上端（軸からの半径）
+const SPOKE_SITES = [{ z: () => HUB_Z, r: 230 }, { z: () => NEW_YARD_Z, r: 232 }, { z: () => ZG_Z, r: 252 }];
 let hubCabMesh, hubNeonMat, hubWarn, hubWarnMat;
 function buildHubStation() {
   // 巣: 内側は軸の電車が通るので空け（半径80m〜240m）、外ほど低く・端ほど細る塊
@@ -1577,12 +1579,12 @@ function buildHubStation() {
 
   // スポーク（エレベーターのシャフト）: 巣の外側から地面まで。トラス風に柱4本＋横材
   const posts = [], braces = [], bases = [];
-  for (const th of HUB_SPOKES) {
-    const top = R - 230;
-    for (const [ds, dz] of [[-9, -9], [9, -9], [-9, 9], [9, 9]]) posts.push(th + ds / R, HUB_Z + dz, 0, 2.2, top, 2.2);
-    for (let h = 60; h < top; h += 60) { braces.push(th, HUB_Z - 9, h, 20, 1.2, 1.2); braces.push(th, HUB_Z + 9, h, 20, 1.2, 1.2); braces.push(th - 9 / R, HUB_Z, h + 30, 1.2, 1.2, 20); braces.push(th + 9 / R, HUB_Z, h + 30, 1.2, 1.2, 20); }
-    bases.push(th, HUB_Z, 0, 60, 26, 60, 0xb8bec6);                                               // 地上駅
-    bases.push(th, HUB_Z, 26, 40, 8, 40, 0x8a9099);
+  for (const site of SPOKE_SITES) for (const th of HUB_SPOKES) {
+    const Z = site.z(), top = R - site.r;
+    for (const [ds, dz] of [[-9, -9], [9, -9], [-9, 9], [9, 9]]) posts.push(th + ds / R, Z + dz, 0, 2.2, top, 2.2);
+    for (let h = 60; h < top; h += 60) { braces.push(th, Z - 9, h, 20, 1.2, 1.2); braces.push(th, Z + 9, h, 20, 1.2, 1.2); braces.push(th - 9 / R, Z, h + 30, 1.2, 1.2, 20); braces.push(th + 9 / R, Z, h + 30, 1.2, 1.2, 20); }
+    bases.push(th, Z, 0, 60, 26, 60, 0xb8bec6);                                               // 地上駅
+    bases.push(th, Z, 26, 40, 8, 40, 0x8a9099);
   }
   const trussM = patch(new THREE.MeshStandardMaterial({ color: 0xc8ccd2, roughness: 0.45, metalness: 0.5 }));
   scene.add(instanced(GEO.box, trussM, posts, 6, { color: false, cast: false }));
@@ -1590,7 +1592,7 @@ function buildHubStation() {
   scene.add(instanced(GEO.box, M.bld, bases, 7, { cast: false }));
   // 赤い警告灯（スポークの4隅の柱に150mおき。昼夜とわず点滅）
   const warn = [];
-  for (const th of HUB_SPOKES) for (let h = 40; h < R - 240; h += 150) for (const [ds, dz] of [[-10, -10], [10, 10]]) warn.push(th + ds / R, HUB_Z + dz, h, 6, 6, 6);
+  for (const site of SPOKE_SITES) for (const th of HUB_SPOKES) for (let h = 40; h < R - site.r - 10; h += 150) for (const [ds, dz] of [[-10, -10], [10, 10]]) warn.push(th + ds / R, site.z() + dz, h, 6, 6, 6);
   for (const dz of HUB_RINGS) {                                        // オレンジの輪とスポークの先
     for (let n = 0; n < 24; n++) warn.push(n / 24 * TAU, HUB_Z + dz, R - HUB_RING_R - 10, 9, 9, 9);
     for (let i = 0; i < 8; i++) { const zIn = Math.sign(dz) * 235, rIn = hubSurfR(zIn); warn.push((i + 0.5) / 8 * TAU, HUB_Z + (dz + zIn) / 2, R - (HUB_RING_R + rIn) / 2 - 7, 7, 7, 7); }
@@ -1600,7 +1602,7 @@ function buildHubStation() {
   hubWarn = instanced(new THREE.SphereGeometry(0.5, 8, 6), hubWarnMat, warn, 6, { color: false, cast: false });
   scene.add(hubWarn);
   // かご（各スポークに上り下り2台ずつ）
-  hubCabMesh = new THREE.InstancedMesh(GEO.box, patch(new THREE.MeshStandardMaterial({ color: 0xf2f4f6, roughness: 0.3, metalness: 0.3, emissive: 0xffc8f0, emissiveIntensity: 0.6 })), HUB_SPOKES.length * 2);
+  hubCabMesh = new THREE.InstancedMesh(GEO.box, patch(new THREE.MeshStandardMaterial({ color: 0xf2f4f6, roughness: 0.3, metalness: 0.3, emissive: 0xffc8f0, emissiveIntensity: 0.6 })), SPOKE_SITES.length * HUB_SPOKES.length * 2);
   hubCabMesh.frustumCulled = false;
   scene.add(hubCabMesh);
 
@@ -1641,13 +1643,16 @@ function buildHubStation() {
   scene.add(neon);
 }
 function updateHubStation(t) {
-  const a = hubCabMesh.instanceMatrix.array, top = R - 260;
-  HUB_SPOKES.forEach((th, i) => {
-    for (let c = 0; c < 2; c++) {
-      const u = (t / 90 + i * 0.37 + c * 0.5) % 1;
-      const q = u < 0.45 ? u / 0.45 : u < 0.5 ? 1 : u < 0.95 ? 1 - (u - 0.5) / 0.45 : 0;
-      writeBox(a, (i * 2 + c) * 16, th + (c ? 4.5 : -4.5) / R, HUB_Z, 30 + (top - 30) * q * q * (3 - 2 * q), 8, 12, 14);
-    }
+  const a = hubCabMesh.instanceMatrix.array;
+  SPOKE_SITES.forEach((site, si) => {
+    const top = R - site.r - 30, Z = site.z();
+    HUB_SPOKES.forEach((th, i) => {
+      for (let c = 0; c < 2; c++) {
+        const u = (t / 90 + i * 0.37 + si * 0.23 + c * 0.5) % 1;
+        const q = u < 0.45 ? u / 0.45 : u < 0.5 ? 1 : u < 0.95 ? 1 - (u - 0.5) / 0.45 : 0;
+        writeBox(a, ((si * HUB_SPOKES.length + i) * 2 + c) * 16, th + (c ? 4.5 : -4.5) / R, Z, 30 + (top - 30) * q * q * (3 - 2 * q), 8, 12, 14);
+      }
+    });
   });
   hubCabMesh.instanceMatrix.needsUpdate = true;
   hubWarn.visible = (t % 1.6) < 0.7;                     // 警告灯の点滅
