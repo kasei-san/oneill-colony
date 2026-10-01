@@ -1397,17 +1397,20 @@ function buildRiverside() {
   const k = RIVERSIDE.k, sc = sCenter(RIVER_I[k]), z0 = zCenter(RIVERSIDE.j0) - P / 2 + 8, z1 = zCenter(RIVERSIDE.j1) + P / 2 - 8;
   const th = s => STRIP_PHI[k] + s / R;
   const body = [], canopy = [], poles = [], lanterns = [], tables = [];
+  // 街区のあいだを横切る道路（橋）の上には置かない
+  const onRoad = (z, m) => { const e = (Math.round(z / P + (NZ - 1) / 2 - 0.5) + 0.5 - (NZ - 1) / 2) * P; return Math.abs(z - e) < ROAD / 2 + m; };
   const canopyCols = [0xc0392b, 0xf2f2f2, 0x2f5fa8, 0xd8a531, 0x2e7d5b, 0xe67e22];
   for (const side of [-1, 1]) {
     const sStall = sc + side * 42;                                  // 遊歩道（水際32m〜道路47m）の道路寄り
     for (let z = z0; z < z1; z += rr(7, 10)) {
-      if (rand() < 0.12) continue;                                  // ところどころ通り抜け
+      if (rand() < 0.12 || onRoad(z, 3)) continue;                  // ところどころ通り抜け・道路の上は空ける
       body.push(th(sStall), z, 0, 3.2, 2.3, 4.2, pick([0x8b6b4a, 0xa07850, 0x6e5238, 0xc8b89a]));
       canopy.push(th(sStall - side * 0.6), z, 2.3, 4.4, 0.25, 4.8, pick(canopyCols));
       if (rand() < 0.5) tables.push(th(sStall - side * 5.5), z + rr(-1, 1), 0, 1.4, 0.75, 1.4, 0xd8cfc0);
     }
-    for (let z = z0; z <= z1; z += 18) poles.push(th(sc + side * 33.5), z, 0, 0.25, 4.5, 0.25, 0x5a4a3a);
+    for (let z = z0; z <= z1; z += 18) if (!onRoad(z, 1)) poles.push(th(sc + side * 33.5), z, 0, 0.25, 4.5, 0.25, 0x5a4a3a);
     for (let z = z0; z < z1; z += 1.8) {
+      if (onRoad(z, 1)) continue;
       const u = ((z - z0) % 18) / 18;
       lanterns.push(th(sc + side * 33.5), z, 4.2 - 0.7 * Math.sin(Math.PI * u), 0.55, 0.7, 0.55);
     }
