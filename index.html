@@ -3061,6 +3061,7 @@ const PRESETS = [
   ['中心軸のそば（無重力帯）', () => go(STRIP_PHI[0], -HL + 1200, R - 80, 0, 0)],
   ['地上の電車の駅', () => go(STATIONS.ring[0] + 60 / RING_R, BRIDGE_Z[7] + 40, 26, Math.PI + 0.2, 0.05)],
   ['ターミナル駅（線路の交差点）', () => { const ts = landmarks.terminals[0], t = ts.find(x => x.kind === 'office') || ts[0]; go(STRIP_PHI[0] + 160 / R, t.z - 260, 45, -0.45, 0.12); }],
+  ['★ 旧拡張エリア境界線', () => go(STRIP_PHI[ERA.k] + (sCenter(ERA.i0) - 60) / R, zCenter(ERA.oldEnd) + P / 2, 18, Math.PI / 2, -0.12)],  // 開拓期と商業区の境目の道路から、境界線に沿って東を見る
   ['★ 拡張境界地区', () => { const sc = sCenter((ERA.i0 + ERA.i1) / 2); go(STRIP_PHI[ERA.k] + sc / R, zCenter(ERA.j0) - 60, 38, 0, -0.18); }],
   ['★ 歓楽街', () => { const n = landmarks.neonSpot || landmarks.cbd[0][0]; go(STRIP_PHI[0] + (Math.round(n.s / P) * P + 6.5) / R, n.z - 150, 30, 0, 0.32); }],
   ['★ 中心軸の駅（見上げる）', () => go(STRIP_PHI[0] + 0.25, HUB_Z - 700, 120, 0, 1.0)],
