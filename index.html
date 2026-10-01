@@ -1416,9 +1416,9 @@ function hullSkeleton(len, wid, ribCol, plateCol, plated) {
     parts.push(vcol(new THREE.BoxGeometry(w, 1.2, 1.2).translate(0, w / 2, z), c), vcol(new THREE.BoxGeometry(w, 1.2, 1.2).translate(0, -w / 2, z), c));
     parts.push(vcol(new THREE.BoxGeometry(1.2, w, 1.2).translate(w / 2, 0, z), c), vcol(new THREE.BoxGeometry(1.2, w, 1.2).translate(-w / 2, 0, z), c));
     if (i / n > 1 - plated) {                             // 前の方だけ外板を張り終えている
-      const p = new THREE.Color(plateCol).toArray(), L = len / n + 0.4;
-      parts.push(vcol(new THREE.BoxGeometry(w + 1, 0.6, L).translate(0, w / 2 + 0.6, z - len / n / 2), p), vcol(new THREE.BoxGeometry(w + 1, 0.6, L).translate(0, -w / 2 - 0.6, z - len / n / 2), p));
-      parts.push(vcol(new THREE.BoxGeometry(0.6, w + 1, L).translate(w / 2 + 0.6, 0, z - len / n / 2), p), vcol(new THREE.BoxGeometry(0.6, w + 1, L).translate(-w / 2 - 0.6, 0, z - len / n / 2), p));
+      const p = new THREE.Color(plateCol).toArray(), segL = len / n + 0.4;
+      parts.push(vcol(new THREE.BoxGeometry(w + 1, 0.6, segL).translate(0, w / 2 + 0.6, z - len / n / 2), p), vcol(new THREE.BoxGeometry(w + 1, 0.6, segL).translate(0, -w / 2 - 0.6, z - len / n / 2), p));
+      parts.push(vcol(new THREE.BoxGeometry(0.6, w + 1, segL).translate(w / 2 + 0.6, 0, z - len / n / 2), p), vcol(new THREE.BoxGeometry(0.6, w + 1, segL).translate(-w / 2 - 0.6, 0, z - len / n / 2), p));
     }
   }
   return mergeGeometries(parts);
@@ -3578,12 +3578,14 @@ function scheduleMusic(until) {
 }
 // 動画用: BGM を sec 秒ぶん OfflineAudioContext で合成し、WAV を base64 で返す（最初と最後はフェード）
 async function renderMusicWav(sec) {
+  const wasOn = music.on; if (wasOn) setMusic(false);   // 合成中にリアルタイムのタイマーがグローバル状態を触らないように
   const sr = 44100, off = new OfflineAudioContext(2, Math.ceil(sr * sec), sr), keep = { ctx: audio.ctx, out: music.out, bus: music.bus, next: music.next, step: music.step };
   audio.ctx = off; music.out = null; musicNodes(); music.next = 0.05; music.step = 0;
   music.out.gain.setValueAtTime(0, 0); music.out.gain.linearRampToValueAtTime(0.8, 1.5); music.out.gain.setValueAtTime(0.8, sec - 2.5); music.out.gain.linearRampToValueAtTime(0, sec - 0.2);
   scheduleMusic(sec);
   const buf = await off.startRendering();
   Object.assign(music, { out: keep.out, bus: keep.bus, next: keep.next, step: keep.step }); audio.ctx = keep.ctx;
+  if (wasOn) setMusic(true);
   const n = buf.length, data = new DataView(new ArrayBuffer(44 + n * 4)), ch = [buf.getChannelData(0), buf.getChannelData(1)];
   const str = (o, t) => [...t].forEach((c, i) => data.setUint8(o + i, c.charCodeAt(0)));
   str(0, 'RIFF'); data.setUint32(4, 36 + n * 4, true); str(8, 'WAVEfmt '); data.setUint32(16, 16, true); data.setUint16(20, 1, true); data.setUint16(22, 2, true);
@@ -3595,6 +3597,7 @@ async function renderMusicWav(sec) {
 window.__renderMusicWav = renderMusicWav;
 window.__snsDuration = () => SNS_SHOTS.reduce((a, s) => a + s.dur, 0);
 function setMusic(on) {
+  if (on === music.on && (!on || music.timer)) return;   // 何度呼んでも二重に鳴らさない
   if (!audio.ctx) startAudio();
   if (!audio.ctx) return;
   musicNodes();
@@ -3615,7 +3618,7 @@ function demoStartShot(i) {
     if (REC) put(); else setTimeout(put, 300);
   }
   demo.i = i; demo.t = 0;
-  { const L = SHOTLIST(); let nt = 0; for (let k = 0; k <= i; k++) if (L[k].night !== undefined) nt = L[k].night;   // 場面までの昼夜の指定をたどる（飛ばしても合う）
+  { const list = SHOTLIST(); let nt = 0; for (let k = 0; k <= i; k++) if (list[k].night !== undefined) nt = list[k].night;   // 場面までの昼夜の指定をたどる（飛ばしても合う）
     if (dayNight.target !== nt) { dayNight.target = nt; dayNight.applied = false; } }
   if (sh.space) {
     space.on = true; space.mode = sh.space.mode; space.target = sh.space.target || null; Object.assign(space, sh.space.from); setSpaceDOF(true); envTimer = 99;
@@ -3656,7 +3659,7 @@ function updateDemo(dt) {
     if (c.fadeOut && demo.t > c.dur - fl) o = (demo.t - (c.dur - fl)) / fl;
     if (c.fadeIn && demo.t < 1.5) o = Math.max(o, 1 - demo.t / 1.5);
     if (demo.i === 0 && demo.t < 1) { o = Math.max(o, 1 - demo.t); col = '#000'; }
-    const L = SHOTLIST(); if (demo.i === L.length - 1 && demo.t > c.dur - 1) { o = Math.max(o, (demo.t - (c.dur - 1))); col = '#000'; }
+    const list = SHOTLIST(); if (demo.i === list.length - 1 && demo.t > c.dur - 1) { o = Math.max(o, (demo.t - (c.dur - 1))); col = '#000'; }
     demoEl.fade.style.background = col; demoEl.fade.style.opacity = Math.min(1, o);
   }
 }
@@ -3677,9 +3680,7 @@ function stopDemo() {
 function setDemoPause(p) { demo.paused = p; el('demo-pause').textContent = p ? '▶' : '⏸'; el('demo-pause').title = p ? '再生（Space）' : '一時停止（Space）'; }
 function demoStep(d) {
   // 夜/昼の切り替えは途中の場面にしか書いていないので、移動先までの指定をたどって合わせる
-  const L = SHOTLIST(), i = (demo.i + d + L.length) % L.length;
-  let night = 0; for (let k = 0; k <= i; k++) if (L[k].night !== undefined) night = L[k].night;
-  if (dayNight.target !== night) { dayNight.target = night; dayNight.applied = false; }
+  const list = SHOTLIST(), i = (demo.i + d + list.length) % list.length;   // 昼夜は demoStartShot が合わせる
   demoStartShot(i);
 }
 el('demo-prev').onclick = e => { e.currentTarget.blur(); demoStep(-1); };
