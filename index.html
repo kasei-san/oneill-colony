@@ -552,6 +552,10 @@ function genStrip(k) {
   const nearPlainTerm = (s, z) => terms.some(t => t.kind === 'plain' && Math.hypot(s, z - t.z) < 260);
   landmarks.samples ??= {};
   const termAt = (s, z) => { for (const t of terms) { const d = Math.hypot(s, z - t.z); if (d < t.r && t.kind !== 'plain') return { t, f: 1 - d / t.r }; } return null; };
+  // 工業地帯: 窓際の片側にまとまった地区を3か所（半径450〜650m）
+  const indZ = Array.from({ length: 3 }, (_, n) => ({ z: -5200 + n * 5200 + rr(-900, 900), side: rand() < 0.5 ? -1 : 1, r: rr(450, 650) }));
+  const inInd = (s, z) => indZ.some(q => Math.sign(s) === q.side && Math.abs(s) > STRIP_W / 2 - 900 && Math.abs(z - q.z) < q.r);
+  (landmarks.indZones ??= [])[k] = indZ;
   const neonC = Array.from({ length: 18 }, () => ({ s: rr(-1300, 1300), z: rr(-7600, 7600), r: rr(380, 560) }));
   const neonMap = new Uint8Array(NS * NZ * 4);
   let neonBlk = false;
@@ -593,15 +597,16 @@ function genStrip(k) {
     else if (rand() < 0.06) type = 'park';
     else if (tm && rand() < 0.35 + 0.6 * tm.f) type = 'down';           // ターミナルのまわりはビルが密集
     else if (rand() < cb * 1.15) type = 'down';
-    else if (Math.abs(z) > HL - 1400 && rand() < 0.55) type = 'farm';                     // 両端の蓋の近くは農業区画
-    else if (c > 0.78 && rand() < 0.3) type = 'factory';                                   // 窓際は工場・倉庫街
+    else if (Math.abs(z) > HL - 1400 && rand() < 0.9) type = 'farm';                      // 両端の蓋の近くは一面の農業区画
+    else if (inInd(s, z) && rand() < 0.9) type = 'factory';                               // 窓際の工業地帯
+    else if (c > 0.85 && rand() < 0.08) type = 'factory';
     else if (nearPlainTerm(s, z) && rand() < 0.6) type = 'shop';                           // 発展していないターミナルの駅前は商店街
     else if (rand() < 0.012) type = 'campus';
     else if (c > 0.4 && c < 0.8 && rand() < 0.06) type = 'danchi';
     else if (rand() < 0.3 + 0.35 * (1 - c) + cb * 0.3) type = 'mid';
     else if ((i > 0 && blockTypes[k][(i - 1) * NZ + j] === 'temple' || j > 0 && blockTypes[k][i * NZ + j - 1] === 'temple') && rand() < 0.8) type = 'forest'; // 鎮守の森は隣の街区まで続く
     else { const r = rand(); type = r < 0.07 ? 'school' : r < 0.11 ? 'shop' : r < 0.14 ? 'temple' : 'res'; }
-    if (!landmarks.samples[type] && k === 0 && Math.abs(z) < HL - (type === 'farm' ? 500 : 1600)) landmarks.samples[type] = { k, s, z }; // 見本は蓋から離れた場所（カメラが蓋にめり込まない）
+    if (!landmarks.samples[type] && k === 0 && type !== 'factory' && type !== 'farm' && type !== 'temple' && Math.abs(z) < HL - 1600) landmarks.samples[type] = { k, s, z }; // 見本は蓋から離れた場所（カメラが蓋にめり込まない）
     if (type === 'shop' && !landmarks.shopSta && nearPlainTerm(s, z)) { const t = terms.find(t => t.kind === 'plain' && Math.hypot(s, z - t.z) < 260); landmarks.shopSta = { k, s, z, tz: t.z }; }
     blockTypes[k][i * NZ + j] = type;
     neonBlk = (type === 'down' || type === 'mid') && (neonC.some(c => Math.hypot(s - c.s, z - c.z) < c.r) || (tm && tm.t.kind === 'neon'));
@@ -765,6 +770,25 @@ function genStrip(k) {
     }
   }
   landmarks.tallest[k] = tallest;
+  if (k === 0) {
+    const bt = (i, j) => (i >= 0 && i < NS && j >= 0 && j < NZ) ? blockTypes[k][i * NZ + j] : null;
+    const iOf = s => Math.round(s / P + (NS - 1) / 2), jOf = z => Math.round(z / P + (NZ - 1) / 2);
+    // 工場: 工業地帯の中心に一番近い工場の街区
+    const q = indZ[1], cs = q.side * (STRIP_W / 2 - 400);
+    let best = 1e9;
+    for (let i = 0; i < NS; i++) for (let j = 0; j < NZ; j++) if (bt(i, j) === 'factory') { const d = Math.hypot(sCenter(i) - cs, zCenter(j) - q.z); if (d < best) { best = d; landmarks.samples.factory = { k, s: sCenter(i), z: zCenter(j) }; } }
+    // 農業: -z 側の農業区画の真ん中あたり
+    best = 1e9;
+    for (let i = 0; i < NS; i++) for (let j = 0; j < NZ; j++) if (bt(i, j) === 'farm') { const d = Math.hypot(sCenter(i) - 300, zCenter(j) + HL - 800); if (d < best) { best = d; landmarks.samples.farm = { k, s: sCenter(i), z: zCenter(j) }; } }
+    // 寺社: 2ブロック以内に歓楽街がある寺社（なければ最初の寺社）
+    for (let i = 0; i < NS && !landmarks.samples.temple; i++) for (let j = 0; j < NZ; j++) {
+      if (bt(i, j) !== 'temple' || Math.abs(zCenter(j)) > HL - 1600) continue;
+      let ns = null;
+      for (let a = -2; a <= 2 && !ns; a++) for (let b = -2; b <= 2; b++) if (neonMap[((j + b) * NS + i + a) * 4]) { ns = { s: sCenter(i + a), z: zCenter(j + b) }; break; }
+      if (ns) { landmarks.samples.temple = { k, s: sCenter(i), z: zCenter(j), ns }; break; }
+    }
+    if (!landmarks.samples.temple) for (let i = 0; i < NS && !landmarks.samples.temple; i++) for (let j = 0; j < NZ; j++) if (bt(i, j) === 'temple' && Math.abs(zCenter(j)) < HL - 1600) { landmarks.samples.temple = { k, s: sCenter(i), z: zCenter(j) }; break; }
+  }
   if (k === 0) {                                                    // 歓楽街のワープ先: まわりに歓楽街の都心・中層ブロックが一番多い場所
     let best = -1;
     for (let i = 1; i < NS - 1; i++) for (let j = 1; j < NZ - 1; j++) {
@@ -1223,6 +1247,9 @@ function buildElevators() {
   scene.add(elevCabMesh);
 }
 let elevCabMesh;
+// ガイドツアー用: 指定したエレベーターのかごを、今から period 秒で上らせる
+function elevLaunch(i, t, period) { const e = elevators[i]; e.period = period; e.ph = ((-t / period) % 1 + 1) % 1; }
+function elevCabH(i, t) { const e = elevators[i], u = ((t / e.period + e.ph) % 1), q = u < 0.45 ? u / 0.45 : u < 0.5 ? 1 : u < 0.95 ? 1 - (u - 0.5) / 0.45 : 0; return e.top * q * q * (3 - 2 * q); }
 function updateElevators(t) {
   const a = elevCabMesh.instanceMatrix.array;
   elevators.forEach((e, i) => {
@@ -3082,16 +3109,16 @@ function hud(dt) {
 
 // ===== ガイドツアー（デモ）: 宇宙から入港して街区と観光地をめぐり、夜景を見て、宇宙へ戻ってループする =====
 const preset = label => PRESETS.find(p => p[0].includes(label))[1];
-const atSample = key => () => {
-  const sp = landmarks.samples[key], sg = sp.s >= 0 ? 1 : -1, cs = sp.s - sg * 120, cz = sp.z - 130;
-  go(STRIP_PHI[sp.k] + cs / R, cz, 85, Math.atan2(sp.s - cs, sp.z - cz), -0.42);
+const atSample = (key, h = 85, back = 130) => () => {
+  const sp = landmarks.samples[key], sg = sp.s >= 0 ? 1 : -1, cs = sp.s - sg * back * 0.9, cz = sp.z - back;
+  go(STRIP_PHI[sp.k] + cs / R, cz, h, Math.atan2(sp.s - cs, sp.z - cz), -Math.atan2(h, Math.hypot(sp.s - cs, sp.z - cz)) * 0.75);
 };
 // 2点のあいだから見下ろす（a の上空から b を見る）
 const lookAt = (k, as, az, bs, bz, h, pitchK = 0.85) => go(STRIP_PHI[k] + as / R, az, h, Math.atan2(bs - as, bz - az), -Math.atan2(h, Math.hypot(bs - as, bz - az)) * pitchK);
 // ターミナル駅: 縦の高架線の真上から交差点を見て、縦の線の電車を1本ホームに止める
 function terminalShot() {
   const k = 0, ts = landmarks.terminals[k], t = ts.find(x => x.kind === 'office') || ts[0];
-  lookAt(k, 0, t.z - 330, 0, t.z, 62, 0.95);
+  lookAt(k, 150, t.z - 200, 0, t.z, 280, 1.0);              // ビルより高い位置から交差点を見下ろす
   const tr = vehicles.trains.find(x => !x.ring && x.dir > 0 && Math.abs(x.lane - STRIP_PHI[k]) < 0.01);
   if (tr && tr.stops) {
     const idS = STATIONS.axial.findIndex(z => Math.abs(z - t.z) < 1), stopU = tr.stops[idS];
@@ -3125,21 +3152,23 @@ const SHOTS = [
     from: terminalShot, d: { z: 160, h: -10 } },
   { ch: '街区', t: '歓楽街', x: '昼間は少し静かな歓楽街なのだ。ビルの壁には看板がびっしり、大型スクリーンには広告が流れているのだ。本番は夜――あとで戻ってくるのだ。', dur: 13,
     from: preset('★ 歓楽街'), d: { z: 120, h: -10 } },
-  { ch: '街区', t: '商店街', x: '発展しなかった駅の前には、アーケードのかかった昔ながらの商店街が残っているのだ。色とりどりの小さな店が並び、いつも人でにぎわっているのだ。', dur: 12, from: () => { const p = landmarks.shopSta || landmarks.samples.shop; const sg = p.s >= 0 ? -1 : 1; lookAt(p.k, sg * 70, (p.tz ?? p.z) - 40, p.s, p.z, 60); }, d: { z: 40, h: -10 } },
-  { ch: '街区', t: '寺社と鎮守の森', x: 'コロニーの人々は、地球から神様もいっしょに連れてきたのだ。朱色の鳥居と鎮守の森が、住宅地の中に静かにたたずんでいるのだ。', dur: 11, from: atSample('temple'), d: { z: 70, yaw: 0.2 } },
-  { ch: '街区', t: '工場と倉庫街', x: '窓際には、コロニーの暮らしを支える工場や倉庫が集まっているのだ。トラックが行き交う「街の裏側」なのだ。', dur: 11, from: atSample('factory'), d: { z: 70, yaw: 0.2 } },
-  { ch: '街区', t: '農業区画', x: '両端の蓋の近くには、畑とガラスの温室が広がっているのだ。300万人の食べ物の多くは、このコロニーの中で育てているのだ。', dur: 12, from: atSample('farm'), d: { z: 90, yaw: 0.2 } },
+  { ch: '街区', t: '商店街', x: '発展しなかった駅の前には、アーケードのかかった昔ながらの商店街が残っているのだ。色とりどりの小さな店が並び、いつも人でにぎわっているのだ。', dur: 12, from: () => { const p = landmarks.shopSta || landmarks.samples.shop; go(STRIP_PHI[p.k] + p.s / R, p.z - 54, 3.2, 0, 0.03); }, d: { z: 75 } },   // アーケードの屋根の下を歩く
+  { ch: '街区', t: '寺社と鎮守の森', x: 'コロニーの人々は、地球から神様もいっしょに連れてきたのだ。朱色の鳥居と鎮守の森が、住宅地の中に静かにたたずんでいるのだ。', dur: 11, from: () => { const t = landmarks.samples.temple, n = t.ns || { s: t.s + 110, z: t.z }, dx = n.s - t.s, dz = n.z - t.z, L = Math.hypot(dx, dz) || 1; lookAt(t.k, t.s - dx / L * 120, t.z - dz / L * 120, t.s + dx * 0.5, t.z + dz * 0.5, 38, 0.7); }, d: { h: -6 } },  // 寺社の向こうに歓楽街
+  { ch: '街区', t: '工場と倉庫街', x: '窓際には、コロニーの暮らしを支える工場や倉庫が集まっているのだ。トラックが行き交う「街の裏側」なのだ。', dur: 11, from: atSample('factory', 55, 60), d: { z: 60, yaw: 0.15 } },
+  { ch: '街区', t: '農業区画', x: '両端の蓋の近くには、畑とガラスの温室が広がっているのだ。300万人の食べ物の多くは、このコロニーの中で育てているのだ。', dur: 12, from: () => { const sp = landmarks.samples.farm; lookAt(sp.k, sp.s, sp.z - 80, sp.s, sp.z - 500, 55, 0.75); }, d: { z: -90, yaw: 0.12 } },   // 畑の中から蓋の方（一面の畑）を向く
   { ch: '観光地', t: '大きな公園', x: '街のところどころにある大きな公園なのだ。鳥が群れで旋回し、木々が風に揺れているのだ。空の代わりに見えるのは、反対側の街なのだ。', dur: 12, from: preset('大きな公園'), d: { z: 100, pitch: 0.1 } },
   { ch: '観光地', t: '窓の上を渡る橋', x: '陸地と陸地のあいだにある窓は、全面ガラスなのだ。その上を渡る橋からは、足元のガラス越しに宇宙が見えるのだ。', dur: 13, from: preset('橋の上'), d: { th: 0.04, pitch: -0.3 } },
   { ch: '観光地', t: 'リング大観覧車と遊園地', x: '窓のすぐそばに立つ直径240mの大観覧車なのだ。駅を降りるとすぐ遊園地で、ジェットコースターやメリーゴーラウンドがにぎやかに動いているのだ。', dur: 14, from: preset('リング大観覧車'), d: { z: 120, yaw: 0.15 } },
-  { ch: '観光地', t: '蓋をのぼるエレベーター', x: '両端の蓋には、地面から中心の宇宙港へまっすぐ上がるエレベーターが並んでいるのだ。上に行くほど体が軽くなり、終点ではふわりと浮いてしまうのだ。', dur: 13,
-    from: () => go(STRIP_PHI[0] + 45 / R, -HL + 260, 25, Math.PI - 0.12, 0.85), d: { pitch: 0.3, h: 30 } },
+  { ch: '観光地', t: '蓋をのぼるエレベーター', x: '両端の蓋には、地面から中心の宇宙港へまっすぐ上がるエレベーターが並んでいるのだ。いっしょに上ってみると、街がどんどん遠ざかり、上に行くほど体が軽くなって、終点ではふわりと浮いてしまうのだ。', dur: 16,
+    from: () => { const i = elevators.findIndex(e => Math.abs(e.th - STRIP_PHI[0]) < 1e-3 && e.z < 0); demo.elev = i; elevLaunch(i, elapsed, 34); go(STRIP_PHI[0] + 130 / R, elevators[i].z + 260, 30, Math.PI - 0.5, 0); },
+    follow: () => {                                  // 上っていく電車の斜め後ろについていき、電車を画面の中心にとらえる
+      const e = elevators[demo.elev], h = elevCabH(demo.elev, elapsed), ds = 130, dz = 260;
+      player.h = Math.max(20, h + 30); player.th = e.th + ds / (R - player.h); player.z = e.z + dz;
+      player.yaw = Math.atan2(-ds - 8.5, -dz); player.pitch = Math.atan2(h + 28 - player.h, Math.hypot(ds, dz)); } },
   { ch: '夜', t: 'ミラーが閉じて、夜が来る', x: '夕方になると、外の3枚のミラーがゆっくり窓に閉じていくのだ。差し込む光が消えて、コロニーに夜が訪れるのだ。', dur: 16, night: 1,
     from: preset('上空 1500m'), d: { z: 900, pitch: 0.2 } },
   { ch: '夜', t: '光の筒', x: '夜のコロニーを中心軸から眺めると、窓明かりと街灯と車の光の流れが、円筒の内側をぐるりと埋め尽くすのだ。ここでしか見られない、上下左右すべてが夜景の世界なのだ。', dur: 18,
     from: () => go(STRIP_PHI[0], -HL + 2500, R - 120, 0, 0), d: { z: 2200, yaw: 0.3 } },
-  { ch: '夜', t: '夜の窓に架かる橋', x: '外のミラーは細い板をすだれのように並べた作りで、夜に閉じても板と板のすき間が残るのだ。橋の上から足元のガラスをのぞくと、そのすき間から本物の星空が見えるのだ。', dur: 15,
-    from: () => go(WIN_PHI[0] - 0.05, BRIDGE_Z[6] + 11, 6, 0.35, -0.55), d: { th: 0.04, pitch: -0.15 } },
   { ch: '夜', t: '目を覚ます歓楽街', x: '昼間は静かだった歓楽街が、夜になると一気に目を覚ますのだ。ネオン看板と広告スクリーンが道路まで色とりどりに染めるのだ。', dur: 15, from: preset('★ 歓楽街'), d: { z: 160, h: -12 } },
   { ch: '夜', t: '提灯の灯る川辺の屋台通り', x: '陸地を流れる川の岸には遊歩道があり、夜になると屋台がずらりと並ぶのだ。提灯の下で、水面に揺れる光を眺めながら食べ歩きを楽しめるのだ。', dur: 15,
     from: () => go(STRIP_PHI[RIVERSIDE.k] + (sCenter(RIVER_I[RIVERSIDE.k]) + 51) / R, zCenter(RIVERSIDE.j0) - 40, 12, -0.12, 0.05), d: { z: 520 } },
@@ -3241,6 +3270,7 @@ function updateDemo(dt) {
   if (sh.space) {
     for (const k of ['az', 'tilt', 'dist', 'tz']) space[k] = THREE.MathUtils.lerp(sh.space.from[k], sh.space.to[k], u);
   } else {
+    if (sh.follow) { sh.follow(); return; }
     const d = sh.d || {}, s0 = demo.start;
     player.th = s0.th + (d.th || 0) * u; player.z = s0.z + (d.z || 0) * u; player.h = s0.h + (d.h || 0) * u;
     player.yaw = s0.yaw + (d.yaw || 0) * u; player.pitch = s0.pitch + (d.pitch || 0) * u;
@@ -3321,7 +3351,7 @@ setTimeout(() => {
   drawMinimapBase();
   PRESETS[0][1]();
   el('loading').classList.add('hidden');
-  window.__ready = true; window.__demo = demo; window.__startDemo = startDemo; window.__demoShot = demoStartShot; window.__lm = landmarks; window.__player = player; window.__ships = ships; window.__trains = vehicles.trains; window.__night = toggleNight; window.__space = space; window.__toggleSpace = toggleSpace; window.__viewEntrance = viewEntrance; window.__extShips = extShips; window.__post = post; window.__t = () => elapsed; window.__scene = scene; window.__axis = () => axisCarMesh;
+  window.__ready = true; window.__demo = demo; window.__startDemo = startDemo; window.__demoShot = demoStartShot; window.__lm = landmarks; window.__demoTitle = n => SHOTS[n] && SHOTS[n].t; window.__player = player; window.__ships = ships; window.__trains = vehicles.trains; window.__night = toggleNight; window.__space = space; window.__toggleSpace = toggleSpace; window.__viewEntrance = viewEntrance; window.__extShips = extShips; window.__post = post; window.__t = () => elapsed; window.__scene = scene; window.__axis = () => axisCarMesh;
   frame();
   if (new URLSearchParams(location.search).has('demo')) startDemo();
 }, 30);
