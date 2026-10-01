@@ -3852,9 +3852,9 @@ addEventListener('keydown', e => {
   } else if (e.code === 'KeyG') startDemo();
 }, true);
 const unmuteDemo = () => { startAudio(); setMusic(true); el('snd-hint').classList.add('hidden'); };
-el('snd-hint').onclick = e => { e.stopPropagation(); unmuteDemo(); };
+el('snd-hint').onclick = unmuteDemo;
 // SNS 版と、音がまだ出ていないときのクリックは音を出すだけ（ツアーは止めない）
-renderer.domElement.addEventListener('pointerdown', () => { if (SNS || !el('snd-hint').classList.contains('hidden')) unmuteDemo(); else stopDemo(); });
+renderer.domElement.addEventListener('pointerdown', () => { if (SNS || !audio.ctx || audio.ctx.state !== 'running') unmuteDemo(); else stopDemo(); });
 { const b = document.createElement('button'); b.textContent = '▶ ガイドツアー SNS版（縦長・約1分）'; b.style.borderColor = '#9fff9f'; b.onclick = () => { location.search = '?sns'; }; warp.prepend(b); }
 { const b = document.createElement('button'); b.textContent = '▶ ガイドツアー（G）'; b.style.borderColor = '#9fff9f'; b.style.fontWeight = '700'; b.onclick = () => { b.blur(); startDemo(); }; warp.prepend(b); }
 
