@@ -42,6 +42,8 @@
   #sns-top > *, #sns-bot > * { transition: opacity 0.5s; }
   .sns #demo-cap, .sns .panel, .rec #demo-bar { display: none !important; }
   .sns #demo-bar { right: auto; left: 12px; bottom: 12px; }
+  #snd-hint { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 20; padding: 12px 22px; font-size: 16px; color: #fff; background: rgba(6,10,20,0.7); border: 1px solid rgba(255,255,255,0.4); border-radius: 24px; cursor: pointer; }
+  .rec #snd-hint { display: none !important; }
   .sns #demo-stop { display: none; }   /* 動作確認用: 縦長の枠の外（左下）に操作ボタン */
   .rec #sns-top > *, .rec #sns-bot > *, .rec #demo-fade { transition: none !important; }
   html.sns, html.sns body { background: #111; }
@@ -76,6 +78,7 @@
 <div id="sns-frame"><div id="sns-top"><div class="ch"></div><div class="t"></div></div><div id="sns-bot"><div class="x"></div></div></div>
 <div id="demo-fade"></div>
 <div id="demo-cap"><div class="ch"></div><h2></h2><p></p></div>
+<button id="snd-hint" class="hidden">🔊 クリックで音楽を再生</button>
 <div id="demo-bar" class="hidden"><span id="demo-pos"></span><button id="demo-prev" title="前へ（←）">⏮</button><button id="demo-pause" title="一時停止（Space）">⏸</button><button id="demo-next" title="次へ（→）">⏭</button><button id="demo-stop" title="終了（Esc）">✕</button></div>
 <div id="mapbox" class="panel">
   <div class="cap">展開図（横=周方向 360° / 縦=軸方向）</div>
@@ -2630,6 +2633,7 @@ const audio = { ctx: null, muted: false };
 function startAudio() {
   if (audio.ctx) { if (audio.ctx.state === 'suspended') audio.ctx.resume(); return; }
   const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  ctx.onstatechange = () => { if (ctx.state === 'running') el('snd-hint').classList.add('hidden'); };   // キー操作などで音が出たらボタンを消す
   const len = ctx.sampleRate * 4, buf = ctx.createBuffer(2, len, ctx.sampleRate);
   for (let ch = 0; ch < 2; ch++) { const d = buf.getChannelData(ch); let last = 0; for (let i = 0; i < len; i++) { last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02; d[i] = last * 3.5; } }
   const noise = () => { const s = ctx.createBufferSource(); s.buffer = buf; s.loop = true; s.start(0, Math.random() * 3); return s; };
@@ -3816,6 +3820,8 @@ function updateDemo(dt) {
 function startDemo() {
   demo.on = true; keys.clear(); setDemoPause(false);
   if (!REC) setMusic(true);
+  // ?demo などクリック前に始まったときはブラウザが音を止めているので、音を出すボタンを出す
+  el('snd-hint').classList.toggle('hidden', REC || !!(audio.ctx && audio.ctx.state === 'running'));
   document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden'));
   demoEl.bar.classList.remove('hidden');
   demoStartShot(0);
@@ -3824,7 +3830,7 @@ function stopDemo() {
   if (!demo.on) return;
   camRoll = 0;
   demo.on = false;
-  setMusic(false);
+  setMusic(false); el('snd-hint').classList.add('hidden');
   demoEl.cap.style.opacity = 0; demoEl.fade.style.opacity = 0; demoEl.bar.classList.add('hidden');
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('hidden'));
 }
@@ -3845,7 +3851,10 @@ addEventListener('keydown', e => {
     if (act) { act(); e.preventDefault(); e.stopImmediatePropagation(); }
   } else if (e.code === 'KeyG') startDemo();
 }, true);
-renderer.domElement.addEventListener('pointerdown', () => { if (SNS) { startAudio(); setMusic(true); } else stopDemo(); });   // SNS 版はクリックで音を出す（止めない）
+const unmuteDemo = () => { startAudio(); setMusic(true); el('snd-hint').classList.add('hidden'); };
+el('snd-hint').onclick = e => { e.stopPropagation(); unmuteDemo(); };
+// SNS 版と、音がまだ出ていないときのクリックは音を出すだけ（ツアーは止めない）
+renderer.domElement.addEventListener('pointerdown', () => { if (SNS || !el('snd-hint').classList.contains('hidden')) unmuteDemo(); else stopDemo(); });
 { const b = document.createElement('button'); b.textContent = '▶ ガイドツアー SNS版（縦長・約1分）'; b.style.borderColor = '#9fff9f'; b.onclick = () => { location.search = '?sns'; }; warp.prepend(b); }
 { const b = document.createElement('button'); b.textContent = '▶ ガイドツアー（G）'; b.style.borderColor = '#9fff9f'; b.style.fontWeight = '700'; b.onclick = () => { b.blur(); startDemo(); }; warp.prepend(b); }
 
