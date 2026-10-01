@@ -786,46 +786,7 @@ function build() {
     scene.add(new THREE.Mesh(geo, patch(new THREE.MeshStandardMaterial({ map: tex, roughness: 1 }))));
   }
 
-  // 両端の山: 陸地の延長として外周から軸方向へせり上がる。窓側の端と内側の縁では低くなる（谷・尾根になる）
-  const capTrees = [];
-  const mtnMat = patch(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, side: THREE.DoubleSide }));
-  for (const zc of [-HL, HL]) {
-    const sg = zc > 0 ? -1 : 1;                       // 内側（コロニー中央）へ向かう向き
-    for (let k = 0; k < 3; k++) {
-      const a0 = STRIP_PHI[k] - SECTOR / 2, nA = 60, nR = 40, rIn = 0.42 * R;
-      const pos = [], col = [], idx = [];
-      const height = (a, r) => {
-        const hr = (R - r) / (R - rIn), edge = Math.min(a - a0, a0 + SECTOR - a);
-        const taper = THREE.MathUtils.smoothstep(edge, 0, 0.16) * (1 - THREE.MathUtils.smoothstep(hr, 0.82, 1.0));
-        const ridge = 1 + 0.18 * Math.sin(a * 23 + hr * 7 + k) * Math.sin(hr * 11 + k * 2) + 0.08 * Math.sin(a * 61 + hr * 19);
-        let h = 1300 * Math.pow(hr, 1.1) * ridge * taper;
-        if (h < 650) { const t = 45; h = Math.floor(h / t) * t + t * THREE.MathUtils.smoothstep(h / t % 1, 0.7, 1.0); } // 段々畑
-        return h;
-      };
-      for (let ir = 0; ir <= nR; ir++) {
-        const r = R - (R - rIn) * ir / nR;
-        for (let ia = 0; ia <= nA; ia++) {
-          const a = a0 + SECTOR * ia / nA, h = height(a, r);
-          pos.push(r * Math.cos(a), r * Math.sin(a), zc + sg * h);
-          const band = Math.floor(h / 45) % 2;
-          const c = h > 1050 ? [0.82, 0.83, 0.85] : h > 700 ? [0.42, 0.4, 0.37] : h > 380 ? [0.2, 0.33, 0.18] : band ? [0.42, 0.56, 0.28] : [0.5, 0.62, 0.32];
-          col.push(...c);
-          if (h > 120 && h < 680 && rand() < 0.5) capTrees.push(a + rr(-0.004, 0.004), zc + sg * h, R - r, 9, 12, 9, pick(PAL.tree));
-        }
-      }
-      for (let ir = 0; ir < nR; ir++) for (let ia = 0; ia < nA; ia++) {
-        const a = ir * (nA + 1) + ia, b = a + 1, c = a + nA + 1, d = c + 1;
-        idx.push(a, b, c, b, d, c);
-      }
-      const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-      g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-      g.setIndex(idx); g.computeVertexNormals();
-      const m = new THREE.Mesh(g, mtnMat); m.receiveShadow = true;
-      scene.add(m);
-    }
-  }
-  scene.add(instanced(GEO.tree, M.tree, capTrees, 7, { cast: false }));
+  buildElevators();
 
   // 中心軸の構造物
   const spine = new THREE.Mesh(new THREE.CylinderGeometry(14, 14, L, 16, 1, true).rotateX(Math.PI / 2), M.steel);
@@ -955,6 +916,49 @@ function build() {
 }
 let stars, glare, carMesh, trainMesh, clouds, carLights, lampHeadMat, lampPoolMat, lampPools;
 
+// ===== 軌道エレベーター（両端の蓋に沿って、端の道路から中心の宇宙港へ上がる） =====
+// 各陸地の中央と左右に1基ずつ×両端 = 18基。シャフト・駅・昇降するかご。夜はシャフトの光の帯とかごが光る
+const elevators = [];
+let elevLightMat, elevCabMat;
+function buildElevators() {
+  const shaft = [], rails = [], stations = [];
+  const TOP = R - 520;                               // 宇宙港の外周あたりまで
+  elevLightMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.55, 0.6, 0.66) });
+  elevCabMat = patch(new THREE.MeshStandardMaterial({ color: 0xe8ecf0, roughness: 0.3, metalness: 0.4, emissive: 0xffd9a0, emissiveIntensity: 0 }));
+  for (const zc of [-HL, HL]) {
+    const sg = zc > 0 ? -1 : 1, zw = zc + sg * 14;     // 蓋の面のすぐ内側
+    for (let k = 0; k < 3; k++) for (const off of [-0.32, 0, 0.32]) {
+      const th = STRIP_PHI[k] + off * SECTOR;
+      shaft.push(th, zw, 0, 14, TOP, 10);                                   // 支柱（シャフト）
+      for (const dx of [-8.5, 8.5]) rails.push(th + dx / R, zw + sg * 4, 0, 1.2, TOP, 1.2); // 光るレール
+      stations.push(th, zw + sg * 25, 0, 60, 24, 40);                       // 地上駅
+      stations.push(th, zw + sg * 10, TOP - 10, 50, 30, 36);                // 上の駅
+      for (let h = 400; h < TOP; h += 400) stations.push(th, zw, h, 22, 4, 16); // 補強リング
+      elevators.push({ th, z: zw + sg * 9, top: TOP - 30, ph: rand(), period: rr(70, 110) });
+    }
+  }
+  const sm = patch(new THREE.MeshStandardMaterial({ color: 0xc8ccd2, roughness: 0.5, metalness: 0.4 }));
+  scene.add(instanced(GEO.box, sm, shaft, 6, { color: false }));
+  scene.add(instanced(GEO.box, sm, stations, 6, { color: false }));
+  scene.add(instanced(GEO.box, elevLightMat, rails, 6, { color: false, cast: false }));
+  elevCabMesh = new THREE.InstancedMesh(GEO.box, elevCabMat, elevators.length * 2);
+  elevCabMesh.frustumCulled = false;
+  scene.add(elevCabMesh);
+}
+let elevCabMesh;
+function updateElevators(t) {
+  const a = elevCabMesh.instanceMatrix.array;
+  elevators.forEach((e, i) => {
+    for (let c = 0; c < 2; c++) {                    // 上りと下りのかご（半周期ずらす）
+      const u = ((t / e.period + e.ph + c * 0.5) % 1);
+      const q = u < 0.45 ? u / 0.45 : u < 0.5 ? 1 : u < 0.95 ? 1 - (u - 0.5) / 0.45 : 0;  // 上って停車、下って停車
+      const h = e.top * q * q * (3 - 2 * q);
+      writeBox(a, (i * 2 + c) * 16, e.th + (c ? 8.5 : -8.5) / R, e.z, h, 10, 14, 8);
+    }
+  });
+  elevCabMesh.instanceMatrix.needsUpdate = true;
+}
+
 // ===== コロニーの外: 自転・外殻・宇宙船の入口・誘導灯・外の宇宙船 =====
 // コロニーは遠心力で1Gになる角速度で自転する。描画上はコロニーを止めて、宇宙側（星・誘導灯・外の船・宇宙カメラ）を逆に回す
 const OMEGA = Math.sqrt(9.8 / R);                    // 約0.057 rad/s（約110秒で1回転）
@@ -962,16 +966,50 @@ const spaceFrame = new THREE.Group(); scene.add(spaceFrame);
 const space = { on: false, az: 0.6, tilt: 2.2, dist: 26000, tz: -HL * 0.25 };
 const ENTRY_Z = -HL - 420;                            // 入口（-z 端の外側ドックの正面）
 const guideRings = [], extShips = [];
+let hullBeacons;
 function buildExterior() {
   // 外殻（陸地の裏側）と両端の外側の蓋
-  const [pc, pg] = canvas(256, 256);
-  pg.fillStyle = '#5d636b'; pg.fillRect(0, 0, 256, 256);
-  for (let i = 0; i < 40; i++) { const v = 80 + Math.random() * 30 | 0; pg.fillStyle = `rgb(${v},${v + 4},${v + 10})`; pg.fillRect(Math.random() * 256, Math.random() * 256, 20 + Math.random() * 60, 10 + Math.random() * 30); }
-  pg.fillStyle = '#3b4047'; for (let i = 0; i <= 256; i += 32) { pg.fillRect(i, 0, 2, 256); pg.fillRect(0, i, 256, 2); }
+  // 外壁パネル: 大小の板の色むら・継ぎ目・ハッチ・警告ストライプ（1枚=120m四方）
+  const [pc, pg] = canvas(1024, 1024);
+  pg.fillStyle = '#6a7079'; pg.fillRect(0, 0, 1024, 1024);
+  const panel = (x, y, w, h) => { const v = 92 + Math.random() * 34 | 0; pg.fillStyle = `rgb(${v},${v + 3},${v + 8})`; pg.fillRect(x + 1, y + 1, w - 2, h - 2); };
+  for (let y = 0; y < 1024; y += 64) for (let x = 0; x < 1024; x += 128) {
+    if (Math.random() < 0.3) { panel(x, y, 128, 64); continue; }
+    for (let yy = 0; yy < 64; yy += 32) for (let xx = 0; xx < 128; xx += 32) panel(x + xx, y + yy, 32, 32);
+  }
+  pg.fillStyle = 'rgba(30,34,40,0.9)';
+  for (let i = 0; i <= 1024; i += 128) { pg.fillRect(i - 2, 0, 4, 1024); pg.fillRect(0, i - 2, 1024, 4); }
+  for (let i = 0; i < 60; i++) { pg.fillStyle = Math.random() < 0.5 ? '#3d434b' : '#8d949d'; pg.fillRect(Math.random() * 1000, Math.random() * 1000, 8 + Math.random() * 30, 6 + Math.random() * 18); }
+  for (let i = 0; i < 6; i++) { const x = Math.random() * 900, y = Math.random() * 1000; for (let j = 0; j < 8; j++) { pg.fillStyle = j % 2 ? '#2a2a2a' : '#d8a531'; pg.fillRect(x + j * 10, y, 10, 6); } }
+  for (let i = 0; i < 400; i++) { pg.fillStyle = 'rgba(0,0,0,0.25)'; pg.fillRect(Math.random() * 1024, Math.random() * 1024, 2, 2); }
   const ptex = new THREE.CanvasTexture(pc); ptex.wrapS = ptex.wrapT = THREE.RepeatWrapping; ptex.colorSpace = THREE.SRGBColorSpace; ptex.anisotropy = ANISO;
-  const hullMat = patch(new THREE.MeshStandardMaterial({ map: ptex, roughness: 0.55, metalness: 0.3, side: THREE.BackSide, emissive: 0x2a2e35, emissiveMap: ptex }));
+  const hullDetail = [];
+  const hullMat = patch(new THREE.MeshStandardMaterial({ map: ptex, roughness: 0.55, metalness: 0.3, side: THREE.BackSide, emissive: 0xffffff, emissiveIntensity: 0.9, emissiveMap: ptex }));
   for (let k = 0; k < 3; k++) scene.add(new THREE.Mesh(stripPatch(GLASS_R, STRIP_PHI[k], (s, z) => [s / 120, z / 120], false), hullMat));
-  const capMat = patch(new THREE.MeshStandardMaterial({ map: ptex, roughness: 0.55, metalness: 0.3, emissive: 0x2a2e35, emissiveMap: ptex }));
+  // 外側の構造: 長手方向のリブ、1kmおきの環状フレーム（窓もまたぐ）、設備ブロック
+  const OUT = -(GLASS_R - R);                       // writeBox の高さ基準（外殻面）
+  for (let k = 0; k < 3; k++) {
+    for (let n = -4; n <= 4; n++) hullDetail.push(STRIP_PHI[k] + n * SECTOR / 9, 0, OUT - 18, 14, 18, L);           // リブ
+    for (const sgn of [-1, 1]) hullDetail.push(STRIP_PHI[k] + sgn * SECTOR / 2, 0, OUT - 30, 40, 30, L);           // 窓との境の太い桁
+    for (let i = 0; i < 70; i++) {                                                                                    // 設備ブロック
+      const w = rr(30, 160), d = rr(40, 300);
+      hullDetail.push(STRIP_PHI[k] + rr(-0.45, 0.45) * SECTOR, rr(-HL + 300, HL - 300), OUT - rr(6, 40), w, rr(6, 40), d);
+    }
+  }
+  const ringBuilder = new GeoBuilder();
+  for (let z = -HL + 500; z < HL; z += 1000) ringBuilder.ringBand(GLASS_R, GLASS_R + 26, z - 12, z + 12, 0, TAU, 240);
+  scene.add(new THREE.Mesh(ringBuilder.geo(), patch(new THREE.MeshStandardMaterial({ color: 0x8a919a, roughness: 0.5, metalness: 0.5, emissive: 0x4a5058 }))));
+  const hdMat = patch(new THREE.MeshStandardMaterial({ map: ptex, color: 0xb8bec6, roughness: 0.5, metalness: 0.4, emissive: 0xffffff, emissiveIntensity: 1.0, emissiveMap: ptex }));
+  scene.add(instanced(GEO.box, hdMat, hullDetail, 6, { color: false, cast: false }));
+  // 外殻の航行灯（赤・白が点滅）
+  const hl = [], hc = [];
+  for (let z = -HL + 500; z < HL; z += 1000) for (let i = 0; i < 12; i++) {
+    const a = i / 12 * TAU, r = GLASS_R + 28; hl.push(r * Math.cos(a), r * Math.sin(a), z); hc.push(...(i % 2 ? [6, 0.3, 0.2] : [6, 6, 6]));
+  }
+  const hg = new THREE.BufferGeometry(); hg.setAttribute('position', new THREE.Float32BufferAttribute(hl, 3)); hg.setAttribute('color', new THREE.Float32BufferAttribute(hc, 3));
+  hullBeacons = new THREE.Points(hg, new THREE.PointsMaterial({ size: 4, sizeAttenuation: false, vertexColors: true, fog: false, transparent: true }));
+  hullBeacons.frustumCulled = false; scene.add(hullBeacons);
+  const capMat = patch(new THREE.MeshStandardMaterial({ map: ptex, roughness: 0.55, metalness: 0.3, emissive: 0xffffff, emissiveIntensity: 0.9, emissiveMap: ptex }));
   for (const sg of [-1, 1]) {
     const g = new THREE.CircleGeometry(GLASS_R + 5, 96);
     if (sg < 0) g.rotateY(Math.PI);
@@ -989,13 +1027,13 @@ function buildExterior() {
   scene.add(new THREE.Mesh(new THREE.CylinderGeometry(320, 380, 500, 32).rotateX(Math.PI / 2).translate(0, 0, HL + 250), dockMat));
   for (let i = 0; i < 6; i++) scene.add(new THREE.Mesh(new THREE.BoxGeometry(900, 8, 380).translate(800, 0, HL + 280).rotateZ(i / 6 * TAU + 0.26), dockMat));
 
-  // 誘導灯: 入口の手前に浮かぶ15個のリング。光が入口へ向かって順に流れる
-  const N = 15;
-  for (let i = 0; i < N; i++) {
+  // 誘導灯: 入口から宇宙へまっすぐ伸びる4本の光の列（赤、全灯同時にゆっくり明滅）
+  {
     const pts = [];
-    for (let j = 0; j < 12; j++) { const a = j / 12 * TAU; pts.push(Math.cos(a) * 240, Math.sin(a) * 240, ENTRY_Z - 500 - i * 650); }
+    for (const [x, y] of [[260, 0], [-260, 0], [0, 260], [0, -260]])
+      for (let i = 0; i < 40; i++) pts.push(x, y, ENTRY_Z - 300 - i * 250);
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-    const m = new THREE.PointsMaterial({ color: new THREE.Color(1, 0.6, 0.2), size: 5, sizeAttenuation: false, fog: false });
+    const m = new THREE.PointsMaterial({ color: new THREE.Color(8, 0.4, 0.25), size: 6, sizeAttenuation: false, fog: false, transparent: true });
     const p = new THREE.Points(g, m); p.frustumCulled = false;
     spaceFrame.add(p); guideRings.push(p);
   }
@@ -1030,12 +1068,9 @@ function buildExterior() {
 }
 function updateSpace(t) {
   spaceFrame.rotation.z = -OMEGA * t;
-  const step = Math.floor(t * 7);
-  guideRings.forEach((p, i) => {
-    const hot = ((i + step) % guideRings.length) < 2;             // 入口へ向かって流れる光
-    p.material.color.setRGB(hot ? 8 : 1.2, hot ? 7 : 0.6, hot ? 5 : 0.2);
-    p.material.size = hot ? 8 : 4;
-  });
+  if (hullBeacons) hullBeacons.material.opacity = (t % 1.5) < 0.15 ? 1 : 0.05;
+  const pulse = 0.5 - 0.5 * Math.cos(t * TAU / 2.4);               // 2.4秒周期でゆっくり明滅
+  for (const p of guideRings) { p.material.opacity = 0.08 + 0.92 * pulse; p.material.size = 4 + 4 * pulse; }
   const zFar = ENTRY_Z - 16000;
   for (const s of extShips) {
     const T = s.period, u = ((t / T + s.ph) % 1) * T;
@@ -1108,6 +1143,8 @@ function updateDayNight(dt) {
   if (glassMeshes[0]) glassMeshes[0].material.color.setScalar(THREE.MathUtils.lerp(1, 0.03, e)); // ガラスは光を受けない素材なので手動で暗くする
   lampHeadMat.color.setRGB(0.6 + 7.4 * e, 0.6 + 5.0 * e, 0.6 + 2.6 * e);   // 夜は灯具が光る（ブルームでにじむ）
   lampPoolMat.opacity = 0.55 * e; lampPools.visible = e > 0.01;
+  elevLightMat.color.setRGB(0.55 + 0.5 * e, 0.6 + 2.6 * e, 0.66 + 5.4 * e);   // シャフトのレールが青白く光る
+  elevCabMat.emissiveIntensity = 2.2 * e;
   if (post.bloom) { post.bloom.strength = THREE.MathUtils.lerp(0.4, 0.6, e); post.bloom.threshold = THREE.MathUtils.lerp(1.15, 0.85, e); }
   renderer.toneMappingExposure = THREE.MathUtils.lerp(1.05, 1.15, e);
   if (Math.abs(n - dayNight.lastEnv) > 0.04 || n === dayNight.target) { envTimer = 99; dayNight.lastEnv = n; } // 反射も追従
@@ -1329,7 +1366,7 @@ function updateAudio(dt) {
   audio.bp.frequency.setTargetAtTime(380 + 300 * Math.sin(now * 0.31) + 200 * Math.sin(now * 0.13), now, 0.5);
   set(audio.hum, space.on ? 0.03 : 0.05 * THREE.MathUtils.smoothstep(h, R - 900, R - 100));
   // 公園や住宅街の低いところでは鳥がさえずる
-  const birdRate = (park * 1.5 + 0.2 * (1 - dens)) * (1 - THREE.MathUtils.smoothstep(h, 20, 200)) * (1 - U.uNight.value); // 夜は鳴かない
+  const birdRate = (park * 1.5 + 0.2 * (1 - dens)) * (1 - THREE.MathUtils.smoothstep(h, 20, 200)) * (1 - U.uNight.value) * (space.on ? 0 : 1); // 夜と宇宙では鳴かない
   if (!audio.muted && Math.random() < birdRate * step * 1.2) {
     const n = 2 + Math.floor(Math.random() * 4), pan = Math.random() * 1.6 - 0.8;
     for (let i = 0; i < n; i++) chirp(ctx, now + i * rr(0.09, 0.16), pan);
@@ -1864,6 +1901,7 @@ function updateSun() {
   else glare.position.copy(camera.position).addScaledVector(sunL[k], 50000);
   spaceFrame.updateMatrixWorld();
   stars.position.copy(spaceFrame.worldToLocal(camera.position.clone()));
+  stars.material.color.setScalar(space.on ? 1 : 0.06 + 0.94 * U.uNight.value); // 昼の内側からは空が明るく星はほぼ見えない
 }
 
 function updateLOD() {
@@ -2037,6 +2075,7 @@ function frame() {
   updateLOD();
   updateVehicles(elapsed);
   updateShips(elapsed);
+  updateElevators(elapsed);
   updateAxisTrains(elapsed);
   updateLocalLife(dt, elapsed);
   updateBirds(dt, elapsed);
