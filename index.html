@@ -3210,7 +3210,7 @@ const SHOTS = [
     from: () => go(STRIP_PHI[0], -HL + 2500, R - 120, 0, 0), d: { z: 2200, yaw: 0.3 } },
   { ch: '夜', t: '目を覚ます歓楽街', x: '昼間は静かだった歓楽街が、夜になると一気に目を覚ますのだ。ネオン看板と広告スクリーンが道路まで色とりどりに染めるのだ。', dur: 15, from: preset('★ 歓楽街'), d: { z: 160, h: -12 } },
   { ch: '夜', t: '提灯の灯る川辺の屋台通り', x: '陸地を流れる川の岸には遊歩道があり、夜になると屋台がずらりと並ぶのだ。提灯の下で、水面に揺れる光を眺めながら食べ歩きを楽しめるのだ。', dur: 15,
-    from: () => go(STRIP_PHI[RIVERSIDE.k] + (sCenter(RIVER_I[RIVERSIDE.k]) + 51) / R, zCenter(RIVERSIDE.j0) - 40, 12, -0.12, 0.05), d: { z: 520 } },
+    from: () => go(STRIP_PHI[RIVERSIDE.k] + (sCenter(RIVER_I[RIVERSIDE.k]) + 51) / R, zCenter(RIVERSIDE.j0) - 40, 12, -0.12, 0.05), d: { z: 200 } },   // 歩く速さでゆっくり（通りを流しきらない）
   { ch: '夜', t: '夜の中央駅', x: '夜の中央駅は、ネオンの塊から光るエレベーターが放射状に伸びる、まるで巨大な灯台なのだ。', dur: 14, from: preset('中心軸の駅（見上げる）'), d: { yaw: 0.3 } },
   { ch: '夜', t: '虹色の観覧車', x: '観覧車の外周とジェットコースターのレールに虹色の光が流れ、遊園地の夜はまだまだ終わらないのだ。', dur: 13, from: preset('リング大観覧車'), d: { z: 120, yaw: 0.15 } },
   { ch: '夜', t: 'ライトアップされた公園', x: '公園では、暖かな光が木々を足元から照らしているのだ。頭上には反対側の街の灯りが、星空のかわりに広がっているのだ。', dur: 13, from: preset('大きな公園'), d: { z: 100, pitch: 0.15 } },
@@ -3309,10 +3309,12 @@ function updateDemo(dt) {
   if (sh.space) {
     for (const k of ['az', 'tilt', 'dist', 'tz']) space[k] = THREE.MathUtils.lerp(sh.space.from[k], sh.space.to[k], u);
   } else {
-    if (sh.follow) { sh.follow(); return; }
-    const d = sh.d || {}, s0 = demo.start;
-    player.th = s0.th + (d.th || 0) * u; player.z = s0.z + (d.z || 0) * u; player.h = s0.h + (d.h || 0) * u;
-    player.yaw = s0.yaw + (d.yaw || 0) * u; player.pitch = s0.pitch + (d.pitch || 0) * u;
+    if (sh.follow) sh.follow();                    // 電車についていく場面（ここで return すると次の場面へ進めなくなる）
+    else {
+      const d = sh.d || {}, s0 = demo.start;
+      player.th = s0.th + (d.th || 0) * u; player.z = s0.z + (d.z || 0) * u; player.h = s0.h + (d.h || 0) * u;
+      player.yaw = s0.yaw + (d.yaw || 0) * u; player.pitch = s0.pitch + (d.pitch || 0) * u;
+    }
   }
   const fadeLen = sh.fadeColor === '#ffffff' ? 2.4 : 1.0;
   if (sh.fadeOut && demo.t > sh.dur - fadeLen && demoEl.fade.style.opacity !== '1') { demoEl.fade.style.background = sh.fadeColor || '#000'; demoEl.fade.style.transition = `opacity ${fadeLen - 0.2}s`; demoEl.fade.style.opacity = 1; }
