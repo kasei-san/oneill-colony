@@ -1089,7 +1089,7 @@ function updateSpace(t) {
     const T = s.period, u = ((t / T + s.ph) % 1) * T;
     const tIn = T * 0.42, tDock = T * 0.16, tOut = T * 0.34;          // 進入・入港中・出港（残りは見えない）
     let z, head = 1, thrust = 0, vis = true;
-    if (u < tIn) { const q = u / tIn; z = zFar + (ENTRY_Z + 400 - zFar) * (1 - (1 - q) * (1 - q)); thrust = 0.35 + 0.65 * (1 - q); }        // 減速しながら接近→入口へ
+    if (u < tIn) { const q = u / tIn; z = zFar + (ENTRY_Z + 400 - zFar) * (1 - (1 - q) * (1 - q)); thrust = Math.max(0, 1 - q / 0.85) ** 1.5; }   // 入口に近づくにつれて噴射を絞り、手前で消す        // 減速しながら接近→入口へ
     else if (u < tIn + tDock) { vis = false; z = ENTRY_Z + 400; }
     else if (u < tIn + tDock + tOut) { const q = (u - tIn - tDock) / tOut; z = ENTRY_Z + 400 + (zFar - ENTRY_Z - 400) * q * q; head = -1; thrust = 0.4 + 0.6 * q; } // 出てきて加速
     else { vis = false; z = zFar; }
@@ -1099,6 +1099,7 @@ function updateSpace(t) {
     const fl = 0.9 + 0.1 * Math.sin(t * 37 + s.ph * 9);
     s.glow.scale.setScalar(70 * thrust * fl);
     s.plume.scale.set(1, 1, 30 + 160 * thrust * fl); s.plume.position.z = -54;
+    s.plume.visible = s.glow.visible = thrust > 0.01;
   }
 }
 function updateSpaceCamera() {
