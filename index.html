@@ -3160,8 +3160,8 @@ const SHOTS = [
   { ch: '観光地', t: '大きな公園', x: '街のところどころにある大きな公園なのだ。鳥が群れで旋回し、木々が風に揺れているのだ。空の代わりに見えるのは、反対側の街なのだ。', dur: 12, from: preset('大きな公園'), d: { z: 100, pitch: 0.1 } },
   { ch: '観光地', t: '窓の上を渡る橋', x: '陸地と陸地のあいだにある窓は、全面ガラスなのだ。その上を渡る橋からは、足元のガラス越しに宇宙が見えるのだ。', dur: 13, from: preset('橋の上'), d: { th: 0.04, pitch: -0.3 } },
   { ch: '観光地', t: 'リング大観覧車と遊園地', x: '窓のすぐそばに立つ直径240mの大観覧車なのだ。駅を降りるとすぐ遊園地で、ジェットコースターやメリーゴーラウンドがにぎやかに動いているのだ。', dur: 14, from: preset('リング大観覧車'), d: { z: 120, yaw: 0.15 } },
-  { ch: '観光地', t: '蓋をのぼるエレベーター', x: '両端の蓋には、地面から中心の宇宙港へまっすぐ上がるエレベーターが並んでいるのだ。いっしょに上ってみると、街がどんどん遠ざかり、上に行くほど体が軽くなって、終点ではふわりと浮いてしまうのだ。', dur: 16,
-    from: () => { const i = elevators.findIndex(e => Math.abs(e.th - STRIP_PHI[0]) < 1e-3 && e.z < 0); demo.elev = i; elevLaunch(i, elapsed, 34); go(STRIP_PHI[0] + 130 / R, elevators[i].z + 260, 30, Math.PI - 0.5, 0); },
+  { ch: '観光地', t: '蓋をのぼるエレベーター', x: '両端の蓋には、地面から中心の宇宙港へまっすぐ上がるエレベーターが並んでいるのだ。いっしょに上ってみると、街がどんどん遠ざかり、上に行くほど体が軽くなって、終点ではふわりと浮いてしまうのだ。', dur: 11,
+    from: () => { const i = elevators.findIndex(e => Math.abs(e.th - STRIP_PHI[0]) < 1e-3 && e.z < 0); demo.elev = i; elevLaunch(i, elapsed, 22); go(STRIP_PHI[0] + 130 / R, elevators[i].z + 260, 30, Math.PI - 0.5, 0); },
     follow: () => {                                  // 上っていく電車の斜め後ろについていき、電車を画面の中心にとらえる
       const e = elevators[demo.elev], h = elevCabH(demo.elev, elapsed), ds = 130, dz = 260;
       player.h = Math.max(20, h + 30); player.th = e.th + ds / (R - player.h); player.z = e.z + dz;
