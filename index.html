@@ -372,6 +372,7 @@ function patch(mat, opts = {}) {
           float rnd = bHash(vec3(floor(g), vBId * 57.0));
           diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.16, 0.19, 0.24), vec3(0.42, 0.47, 0.54), rnd * rnd) * mix(1.0, 0.72, oldT), winMask);
           if (oldT > 0.5) {
+            diffuseColor.rgb /= 0.88 + 0.22 * vBId; diffuseColor.rgb *= 0.95 + 0.1 * vBId;   // 建物ごとの明るさのばらつきを小さく
             // 鉄格子（窓の中の縦の棒）と、上から垂れた汚れの筋
             float bar = 1.0 - smoothstep(0.0, max(fw.x * 1.5, 0.02), abs(fract(f.x * 3.0) - 0.5) - 0.42);
             winMask *= 1.0 - 0.8 * bar * (1.0 - lod); winRoom *= 1.0 - 0.8 * bar;
@@ -619,7 +620,7 @@ function genStrip(k) {
   const th = s => phi + s / R;
   const rect = (col, s, z, w, d) => { g.fillStyle = col; g.fillRect(s - w / 2, z - d / 2, w, d); };
   const addB = (ch, s, z, w, d, h0, h, col, flatTop = true) => {
-    if (neonBlk && rand() < 0.75) col = pick(PAL.cyber);           // 歓楽街は暗め・色付きの外壁
+    if (neonBlk && curType !== 'oldtown' && rand() < 0.75) col = pick(PAL.cyber);   // 旧市街は看板だけ付けて色は変えない           // 歓楽街は暗め・色付きの外壁
     if (neonBlk && h0 === 0 && h >= 8) signs.push([th(s), z, w, d, h, curType === 'oldtown']);
     const rec = [th(s), z, h0, w, h, d, col];
     ch.bld.push(...rec);
@@ -766,7 +767,7 @@ function genStrip(k) {
         if (rand() < 0.06) continue;                                  // ところどころ細い路地
         const cs = s + (a - 1.5) * 23.5 + rr(-0.6, 0.6), cz = z + (b - 1.5) * 23.5 + rr(-0.6, 0.6);
         const w = rr(20.5, 23), d = rr(20.5, 23), h = (8 + Math.floor(rand() * 7)) * 3 + rr(-0.5, 0.5);
-        const col = new THREE.Color(pick([0xa89c88, 0x9a948a, 0xb4a890, 0x8f8c86, 0xa8a094, 0x9a9e94, 0xb8a68c, 0xa09a92, 0xb0a08c])).multiplyScalar(rr(0.9, 1.05)).getHex();   // 灰色やベージュ（新市街の白いビルとの差は残す）
+        const col = new THREE.Color(pick([0xa89e8c, 0xa29c92, 0xaca290, 0xa09e98, 0xa8a196, 0x9fa29a, 0xaea290])).multiplyScalar(rr(0.96, 1.04)).getHex();   // 明るさをそろえる   // 灰色やベージュ（新市街の白いビルとの差は残す）
         addB(ch, cs, cz, w, d, 0, h, col);
         for (let n = Math.floor(rr(1, 4)); n > 0; n--) {             // 屋上に増築された小屋
           const bh = rr(2.2, 3.6), x = cs + rr(-w / 3, w / 3), y = cz + rr(-d / 3, d / 3);
@@ -1444,26 +1445,38 @@ function buildShipyards() {
   }
   // 造船所の街: 駅・白い建物・物資の山・タンク。組み立て中の船（0.75 / 0.75+π）と進水待ちの船（0.75+π/2）のまわりは空ける
   const free = a => [0.75, 0.75 + Math.PI, 0.75 + Math.PI / 2].every(b => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b))) > 0.42);
-  const mods = [], crates = [], tanks = [], spheres = [];
-  for (let n = 0; n < 160; n++) {                                     // 軸に張り付いた白い建物（内側 62m〜外へ）
+  const mods = [], modsWin = [], crates = [], tanks = [], spheres = [], outs = [];
+  for (let n = 0; n < 160; n++) {                                     // 軸に張り付いた白い建物（窓があるのは2割ほど）
     const a = rand() * TAU; if (!free(a)) continue;
-    const rIn = rr(62, 80), rOut = rIn + rr(20, 70);
-    mods.push(a, NEW_YARD_Z + rr(-240, 240), R - rOut, rr(14, 40), rOut - rIn, rr(14, 50), pick([0xf2f4f6, 0xe8ecf0, 0xdfe5ea, 0xf4f1ea, 0xc8d4de]));
+    const rIn = rr(62, 80), rOut = rIn + rr(20, 70), z = NEW_YARD_Z + rr(-240, 240), w = rr(14, 40), d = rr(14, 50);
+    (rand() < 0.2 ? modsWin : mods).push(a, z, R - rOut, w, rOut - rIn, d, pick([0xf2f4f6, 0xe8ecf0, 0xdfe5ea, 0xf4f1ea, 0xc8d4de]));
+    outs.push([a, z, rOut, w, d]);
   }
-  for (let n = 0; n < 50; n++) {                                     // 物資のコンテナの山（かごの内側の梁に寄せて）
-    const a = rand() * TAU; if (!free(a)) continue;
-    const z = NEW_YARD_Z + rr(-230, 230), w = rr(10, 22), d = rr(16, 40);
-    for (let k = 0, h = 0; k < 2 + Math.floor(rand() * 4); k++) { const hh = rr(3, 4.5); crates.push(a, z, R - 226 + h, w, hh, d, pick([0xb8452f, 0x2f6fa8, 0xd8a531, 0x3d8a52, 0x8a8f96, 0xe2e2dc, 0x7a3f74, 0xf08a24])); h += hh; }
+  // 建物の外壁（外向きの面）に付けたタンク
+  for (const [a, z, rOut, w, d] of outs) {
+    if (rand() > 0.35) continue;
+    const dd = rr(6, Math.min(w, d) * 0.6), hh = dd * rr(1, 1.8);
+    if (rand() < 0.6) tanks.push(a, z, R - rOut - hh, dd, hh, dd, pick([0xe8e8e2, 0xd8d8d0, 0xc8ccd0, 0xd8a531]));
+    else spheres.push(a, z, R - rOut - dd * 0.9, dd, dd, dd, pick([0xe8e8e2, 0xd8dce0, 0xe8e0c8]));
   }
-  for (let n = 0; n < 26; n++) {                                     // 何かわからないタンク（筒と球）
-    const a = rand() * TAU; if (!free(a)) continue;
-    const z = NEW_YARD_Z + rr(-230, 230), r0 = rr(85, 200), dd = rr(10, 24);
-    if (rand() < 0.5) tanks.push(a, z, R - r0 - dd * 1.6, dd, dd * 1.6, dd, pick([0xe8e8e2, 0xd8d8d0, 0xc8ccd0, 0xd8a531]));
-    else spheres.push(a, z, R - r0 - dd, dd, dd, dd, pick([0xe8e8e2, 0xd8dce0, 0xe8e0c8]));
+  // かごの長手の梁（16本）の内側に、コンテナとタンクを並べて固定
+  for (let b = 0; b < 16; b++) {
+    const a = b / 16 * TAU; if (!free(a)) continue;
+    for (let z = -230; z < 230; z += rr(30, 70)) {
+      if (rand() < 0.5) { let h = 0; for (let k = 0; k < 1 + Math.floor(rand() * 4); k++) { const hh = rr(3, 4.5); crates.push(a, NEW_YARD_Z + z, R - 227.5 + h, rr(10, 16), hh, rr(14, 30), pick([0xb8452f, 0x2f6fa8, 0xd8a531, 0x3d8a52, 0x8a8f96, 0xe2e2dc, 0x7a3f74, 0xf08a24])); h += hh; } }
+      else if (rand() < 0.4) { const dd = rr(8, 14); tanks.push(a, NEW_YARD_Z + z, R - 227.5, dd, dd * rr(1.2, 2), dd, pick([0xe8e8e2, 0xd8d8d0, 0xc8ccd0])); }
+    }
   }
   const crateMat = patch(new THREE.MeshStandardMaterial({ roughness: 0.7, metalness: 0.2 }));
-  scene.add(instanced(GEO.box, M.bld, mods, 7, { cast: false }), instanced(GEO.box, crateMat, crates, 7, { cast: false }),
+  scene.add(instanced(GEO.box, M.plainBld, mods, 7, { cast: false }), instanced(GEO.box, M.bld, modsWin, 7, { cast: false }), instanced(GEO.box, crateMat, crates, 7, { cast: false }),
     instanced(GEO.cyl, M.tank, tanks, 7, { cast: false }), instanced(GEO.sph, M.tank, spheres, 7, { cast: false }));
+  // トラック: 梁の内側を走るもの（16本の梁のうち空いているもの）と、かごの中を飛ぶ無重力トラック
+  yard.trucks = [];
+  for (let b = 0; b < 16; b++) { const a = b / 16 * TAU; if (!free(a)) continue; for (let k = 0; k < 2; k++) yard.trucks.push({ a, r: 224.5, sc: 2.2, ph: rand(), sp: rr(0.025, 0.045), fly: false }); }
+  for (let k = 0; k < 10; k++) { let a; do { a = rand() * TAU; } while (!free(a)); yard.trucks.push({ a, r: rr(100, 200), sc: 3, ph: rand(), sp: rr(0.03, 0.06), fly: true, bob: rand() * TAU }); }
+  yard.truckMesh = new THREE.InstancedMesh(GEO.truck, M.carShape, yard.trucks.length);
+  yard.trucks.forEach((t, i) => yard.truckMesh.setColorAt(i, new THREE.Color(pick([0xf2c230, 0xf08a24, 0xe8e8e8, 0x2f6fd8, 0xc0392b]))));
+  yard.truckMesh.frustumCulled = false; scene.add(yard.truckMesh);
   addAxisPlatforms(NEW_YARD_Z, 0xd8dce0);                              // 軸の電車の駅（造船所前）
   // 投光器の光の点（かごの輪に沿って）
   const lp = []; for (let z = -260; z <= 260; z += 104) for (let i = 0; i < 32; i++) { const a = i / 32 * TAU; lp.push(Math.cos(a) * 226, Math.sin(a) * 226, z); }
@@ -1504,7 +1517,21 @@ function buildShipyards() {
   const relic = new THREE.Mesh(hullSkeleton(120, 26, 0x8a5a3a, 0x6a4a3a, 0.15), patch(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 })));
   relic.position.set(Math.cos(2.3) * 150, Math.sin(2.3) * 150, HUB_Z + 380); scene.add(relic);   // 最初に造られた船の骨組み（記念に保存）
 }
+// 半径 r・角度 th・z に、前が ±z を向く乗り物を置く（上=軸の向き）
+function writeAtR(a, o, th, z, r, dir, sc) {
+  const c = Math.cos(th), s = Math.sin(th);
+  a.set([-s * dir * sc, c * dir * sc, 0, 0, -c * sc, -s * sc, 0, 0, 0, 0, dir * sc, 0, r * c, r * s, z, 1], o);
+}
 function updateShipyards(t) {
+  if (yard.truckMesh) {
+    const arr = yard.truckMesh.instanceMatrix.array;
+    yard.trucks.forEach((tr, i) => {
+      const u = (t * tr.sp + tr.ph) % 2, f = u < 1 ? u : 2 - u, e = f * f * (3 - 2 * f), dir = u < 1 ? 1 : -1;   // かごの端から端へ往復
+      const z = NEW_YARD_Z - 230 + 460 * e, r = tr.fly ? tr.r + 6 * Math.sin(t * 0.7 + tr.bob) : tr.r;
+      writeAtR(arr, i * 16, tr.a + (tr.fly ? 0.05 * Math.sin(t * 0.5 + tr.bob) : 0), z, r, dir, tr.sc);
+    });
+    yard.truckMesh.instanceMatrix.needsUpdate = true;
+  }
   // 火花: ランダムに明滅
   const pos = yard.sparkPts.geometry.attributes.position;
   yard.sparks.forEach((s, i) => { const on = Math.sin(t * 23 + s.ph * 7) > 0.6; pos.setXYZ(i, on ? s.p.x : 0, on ? s.p.y : 0, on ? s.p.z : 1e7); });
