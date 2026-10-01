@@ -2223,7 +2223,7 @@ function typeAt(th, z) {
   return t === 'river' && k === RIVERSIDE.k && j >= RIVERSIDE.j0 && j <= RIVERSIDE.j1 ? 'riverside' : t;
 }
 const CAR_D = { eraOld: 0.15, eraMid: 0.5, eraNew: 0.6, forest: 0.05, school: 0.2, shop: 0.3, factory: 0.4, campus: 0.4, temple: 0.1, farm: 0.08, danchi: 0.25, plaza: 0.6, down: 1, mid: 0.55, res: 0.2, park: 0.1, river: 0.08, resort: 0.35, riverside: 0.15 };
-const PED_D = { eraOld: 0.4, eraMid: 1, eraNew: 0.6, forest: 0.1, school: 0.5, shop: 1, factory: 0.08, campus: 0.4, temple: 0.25, farm: 0.03, danchi: 0.3, plaza: 1, down: 1, mid: 0.45, res: 0.12, park: 0.3, river: 0.05, resort: 1, riverside: 1 };
+const PED_D = { eraOld: 0.4, eraMid: 1, eraNew: 0.6, forest: 0.1, school: 0.5, shop: 1, factory: 0.08, campus: 0.4, temple: 0.25, farm: 0.003, danchi: 0.3, plaza: 1, down: 1, mid: 0.45, res: 0.12, park: 0.3, river: 0.05, resort: 1, riverside: 1 };
 const local = { cars: [], peds: [] };
 const LC = { n: LOW ? 250 : 600, r: 700 }, LP = { n: LOW ? 600 : 1600, r: 320 };
 let localCarMeshes, pedBodyMesh, pedSkinMesh;
@@ -3211,8 +3211,8 @@ const SHOTS = [
   { ch: '夜', t: '目を覚ます歓楽街', x: '昼間は静かだった歓楽街が、夜になると一気に目を覚ますのだ。ネオン看板と広告スクリーンが道路まで色とりどりに染めるのだ。', dur: 15, from: preset('★ 歓楽街'), d: { z: 160, h: -12 } },
   { ch: '夜', t: '提灯の灯る川辺の屋台通り', x: '陸地を流れる川の岸には遊歩道があり、夜になると屋台がずらりと並ぶのだ。提灯の下で、水面に揺れる光を眺めながら食べ歩きを楽しめるのだ。', dur: 15,
     from: () => go(STRIP_PHI[RIVERSIDE.k] + (sCenter(RIVER_I[RIVERSIDE.k]) + 51) / R, zCenter(RIVERSIDE.j0) - 40, 12, -0.12, 0.05), d: { z: 200 } },   // 歩く速さでゆっくり（通りを流しきらない）
-  { ch: '夜', t: '夜の中央駅', x: '夜の中央駅は、ネオンの塊から光るエレベーターが放射状に伸びる、まるで巨大な灯台なのだ。', dur: 14, from: preset('中心軸の駅（見上げる）'), d: { yaw: 0.3 } },
-  { ch: '夜', t: '虹色の観覧車', x: '観覧車の外周とジェットコースターのレールに虹色の光が流れ、遊園地の夜はまだまだ終わらないのだ。', dur: 13, from: preset('リング大観覧車'), d: { z: 120, yaw: 0.15 } },
+  { ch: '夜', t: '夜の中央駅', x: '夜の中央駅は、ネオンの塊から光るエレベーターが放射状に伸びる、まるで巨大な灯台なのだ。', dur: 14, from: () => go(STRIP_PHI[0] + 0.25, HUB_Z - 420, R - 650, 0, 1.15), d: { yaw: 0.35, h: 60 } },  // 巣のすぐ下から見上げる
+  { ch: '夜', t: '虹色の観覧車', x: '観覧車の外周とジェットコースターのレールに虹色の光が流れ、遊園地の夜はまだまだ終わらないのだ。', dur: 13, from: () => { const zw = BRIDGE_Z[3] + 300; lookAt(1, 1470 - 60, zw - 320, 1470, zw, 60, -0.35); }, d: { z: 70, h: 10 } },  // 観覧車の正面から見上げる
   { ch: '夜', t: 'ライトアップされた公園', x: '公園では、暖かな光が木々を足元から照らしているのだ。頭上には反対側の街の灯りが、星空のかわりに広がっているのだ。', dur: 13, from: preset('大きな公園'), d: { z: 100, pitch: 0.15 } },
   { ch: 'エピローグ', t: 'また朝が来る', x: 'やがてミラーが開き、コロニーにまた朝が来るのだ。宇宙に浮かぶ小さな故郷、ネオ・ミヤギへようこそ。――ガイドはずんだもんでした。', dur: 20, night: 0, fadeIn: true, fadeOut: true,
     space: { mode: 'overview', from: { az: 1.6, tilt: 1.2, dist: 22000, tz: -1000 }, to: { az: 0.5, tilt: 1.05, dist: 34000, tz: -2000 } } },
