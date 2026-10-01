@@ -1407,7 +1407,8 @@ const ZG_Z = 2500;                                    // 無重力パークの�
 // 軸ぞいの並び: 宇宙港（-z 端）→ 新造船所（NEW_YARD_Z）→ 旧造船所＝今の中央駅（HUB_Z）→ 無重力パーク（ZG_Z）
 const NEW_YARD_Z = -4300;
 const HUB_CRANES = [[0.9, -170], [0.9 + Math.PI, 160], [2.5, -60], [4.2, 90], [5.6, -230], [1.7, 220]];   // 旧造船所のクレーン（角度, HUB_Z からのずれ）
-const HUB_RINGS = [-330, 330], HUB_RING_R = 250;                                                                // 古い船台のオレンジの輪
+const HUB_RINGS = [-330, 330], HUB_RING_R = 250;   // 古い船台のオレンジの輪
+const hubSurfR = dz => 90 + 150 * Math.max(0, 1 - (dz / 280) ** 2) * 0.6;   // 中央駅の巣の表面のおおよその半径（クレーンやスポークを刺す位置）
 const yard = { sparks: [], ship: null };
 // 造りかけの船体: 竜骨・肋骨（四角い枠）・前から一部だけ張った外板。長さ len、軸は +z
 function hullSkeleton(len, wid, ribCol, plateCol, plated) {
@@ -1484,16 +1485,20 @@ function buildShipyards() {
   const rust = patch(new THREE.MeshStandardMaterial({ color: 0x9a5a36, roughness: 0.9, metalness: 0.2 }));
   for (const [a, dz] of HUB_CRANES) {
     const c = new THREE.Group(); c.position.z = HUB_Z + dz; c.rotation.z = a;
-    c.add(new THREE.Mesh(new THREE.BoxGeometry(180, 9, 9).translate(240 + 90, 0, 0), rust));        // 外へ張り出した腕
+    const r0 = hubSurfR(dz) - 10;                                    // 巣の表面に刺さる付け根
+    c.add(new THREE.Mesh(new THREE.BoxGeometry(420 - r0, 9, 9).translate((r0 + 420) / 2, 0, 0), rust));   // 外へ張り出した腕
+    c.add(new THREE.Mesh(new THREE.BoxGeometry(16, 16, 16).translate(r0 + 4, 0, 0), rust));             // 付け根の基部
     c.add(new THREE.Mesh(new THREE.BoxGeometry(9, 9, 120).translate(410, 0, -50), rust));            // 腕の先の吊り桁
     c.add(new THREE.Mesh(new THREE.BoxGeometry(3, 3, 70).translate(410, 0, -140), new THREE.MeshStandardMaterial({ color: 0x3a3a3a })));
     scene.add(c);
   }
   for (const dz of HUB_RINGS) {
     scene.add(new THREE.Mesh(new THREE.TorusGeometry(HUB_RING_R, 6, 6, 96).translate(0, 0, HUB_Z + dz), rust));   // 古い船台のリング
-    for (let i = 0; i < 8; i++) {                                     // 輪と駅をつなぐスポーク
-      const sp = new THREE.Mesh(new THREE.BoxGeometry(HUB_RING_R - 80, 5, 5).translate(80 + (HUB_RING_R - 80) / 2, 0, HUB_Z + dz), rust);
-      sp.rotation.z = (i + 0.5) / 8 * TAU; scene.add(sp);
+    for (let i = 0; i < 8; i++) {                                     // 輪から駅の端へ斜めに刺さるスポーク
+      const a = (i + 0.5) / 8 * TAU, zIn = Math.sign(dz) * 235, rIn = hubSurfR(zIn) - 8;
+      const p0 = new THREE.Vector3(Math.cos(a) * HUB_RING_R, Math.sin(a) * HUB_RING_R, HUB_Z + dz), p1 = new THREE.Vector3(Math.cos(a) * rIn, Math.sin(a) * rIn, HUB_Z + zIn);
+      const sp = new THREE.Mesh(new THREE.BoxGeometry(5, 5, p0.distanceTo(p1)), rust);
+      sp.position.copy(p0).add(p1).multiplyScalar(0.5); sp.lookAt(p1); scene.add(sp);
     }
   }
   const relic = new THREE.Mesh(hullSkeleton(120, 26, 0x8a5a3a, 0x6a4a3a, 0.15), patch(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 })));
@@ -1556,7 +1561,7 @@ function buildHubStation() {
   for (const th of HUB_SPOKES) for (let h = 40; h < R - 240; h += 150) for (const [ds, dz] of [[-10, -10], [10, 10]]) warn.push(th + ds / R, HUB_Z + dz, h, 6, 6, 6);
   for (const dz of HUB_RINGS) {                                        // オレンジの輪とスポークの先
     for (let n = 0; n < 24; n++) warn.push(n / 24 * TAU, HUB_Z + dz, R - HUB_RING_R - 10, 9, 9, 9);
-    for (let i = 0; i < 8; i++) warn.push((i + 0.5) / 8 * TAU, HUB_Z + dz, R - (80 + HUB_RING_R) / 2 - 7, 7, 7, 7);
+    for (let i = 0; i < 8; i++) { const zIn = Math.sign(dz) * 235, rIn = hubSurfR(zIn); warn.push((i + 0.5) / 8 * TAU, HUB_Z + (dz + zIn) / 2, R - (HUB_RING_R + rIn) / 2 - 7, 7, 7, 7); }
   }
   for (const [a, dz] of HUB_CRANES) for (const r of [330, 425]) warn.push(a, HUB_Z + dz, R - r - 9, 9, 9, 9);   // クレーンの腕の中ほどと先
   hubWarnMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(9, 0.25, 0.15), fog: false }); // 霞に負けず昼も見える
