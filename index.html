@@ -27,6 +27,17 @@
   #demo-cap .ch { font-size: 12px; letter-spacing: 0.12em; color: #9fd0ff; }
   #demo-cap h2 { margin: 4px 0 6px; font-size: 22px; font-weight: 700; }
   #demo-cap p { margin: 0; font-size: 15px; line-height: 1.75; }
+  #sns-frame { position: fixed; display: none; pointer-events: none; font-size: 100px; }
+  .sns #sns-frame { display: block; }
+  #sns-top, #sns-bot { position: absolute; left: 0; right: 0; background: #000; color: #fff; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; font-family: "Hiragino Sans", system-ui, sans-serif; }
+  #sns-top { top: 0; height: 15%; }
+  #sns-bot { bottom: 0; height: 21%; }
+  #sns-top .ch { font-size: 0.30em; letter-spacing: 0.2em; color: #8fd0ff; margin-bottom: 0.12em; }
+  #sns-top .t { font-size: 0.78em; font-weight: 800; letter-spacing: 0.04em; }
+  #sns-bot .x { font-size: 0.50em; font-weight: 700; line-height: 1.5; padding: 0 0.5em; }
+  #sns-top > *, #sns-bot > * { transition: opacity 0.5s; }
+  .sns #demo-cap, .sns #demo-bar, .sns .panel { display: none !important; }
+  html.sns, html.sns body { background: #111; }
   #demo-fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; transition: opacity 0.8s; }
   #demo-bar { position: fixed; right: 16px; bottom: 10px; color: #c8d4e2; font-size: 12px; background: rgba(6,10,20,0.65); padding: 4px 6px 4px 10px; border-radius: 8px; display: flex; align-items: center; gap: 6px; }
   #demo-bar button { background: rgba(255,255,255,0.1); color: #e6edf5; border: 1px solid rgba(255,255,255,0.25); border-radius: 5px; min-width: 30px; height: 26px; font-size: 13px; cursor: pointer; }
@@ -55,6 +66,7 @@
   </div>
 </div>
 <div id="warp" class="panel"></div>
+<div id="sns-frame"><div id="sns-top"><div class="ch"></div><div class="t"></div></div><div id="sns-bot"><div class="x"></div></div></div>
 <div id="demo-fade"></div>
 <div id="demo-cap"><div class="ch"></div><h2></h2><p></p></div>
 <div id="demo-bar" class="hidden"><span id="demo-pos"></span><button id="demo-prev" title="前へ（←）">⏮</button><button id="demo-pause" title="一時停止（Space）">⏸</button><button id="demo-next" title="次へ（→）">⏭</button><button id="demo-stop" title="終了（Esc）">✕</button></div>
@@ -119,7 +131,29 @@ const cyl = (r, th, z) => new THREE.Vector3(r * Math.cos(th), r * Math.sin(th), 
 const renderer = new THREE.WebGLRenderer({ antialias: false, logarithmicDepthBuffer: true, powerPreference: 'high-performance' });
 renderer.domElement.id = 'view';
 renderer.setPixelRatio(Math.min(devicePixelRatio, LOW ? 1 : 1.5));
-renderer.setSize(innerWidth, innerHeight);
+// ?sns: スマホ縦長（9:16）のダイジェスト版。上下に黒帯（上=街区名、下=解説）
+const SNS = new URLSearchParams(location.search).has('sns');
+const SNS_TOP = 0.15, SNS_BOT = 0.21;                      // 枠の高さに対する上下の帯の割合
+function snsFrame() {
+  let h = innerHeight, w = Math.round(h * 9 / 16);
+  if (w > innerWidth) { w = innerWidth; h = Math.round(w * 16 / 9); }
+  return { x: Math.round((innerWidth - w) / 2), y: Math.round((innerHeight - h) / 2), w, h };
+}
+function viewSize() {
+  if (!SNS) return { w: innerWidth, h: innerHeight };
+  const f = snsFrame(); return { w: f.w, h: Math.round(f.h * (1 - SNS_TOP - SNS_BOT)) };
+}
+function layoutView() {
+  const v = viewSize();
+  renderer.setSize(v.w, v.h);
+  if (SNS) {
+    const f = snsFrame(), c = renderer.domElement.style;
+    c.position = 'fixed'; c.left = f.x + 'px'; c.top = Math.round(f.y + f.h * SNS_TOP) + 'px';
+    const st = document.getElementById('sns-frame').style;
+    Object.assign(st, { left: f.x + 'px', top: f.y + 'px', width: f.w + 'px', height: f.h + 'px', fontSize: (f.w / 1080 * 100) + 'px' });
+  }
+}
+layoutView();
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 renderer.shadowMap.enabled = true;
@@ -130,7 +164,7 @@ const ANISO = renderer.capabilities.getMaxAnisotropy();
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
 scene.fog = new THREE.FogExp2(new THREE.Color(0xbcd0e8), 3.3e-4); // 密度は colonyFog の「地表換算距離」に掛ける係数
-const camera = new THREE.PerspectiveCamera(80, innerWidth / innerHeight, 0.5, 600000); // 遠くの僚コロニーまで描くため遠め
+const camera = new THREE.PerspectiveCamera(SNS ? 70 : 80, viewSize().w / viewSize().h, 0.5, 600000); // 遠くの僚コロニーまで描くため遠め
 
 // ===== 照明: 各陸地は「向かいの窓」から鏡で反射した太陽光を受ける =====
 const sunL = STRIP_PHI.map(p => new THREE.Vector3(-Math.cos(p), -Math.sin(p), 0)
@@ -659,7 +693,7 @@ function genStrip(k) {
     if (type === 'factory') {                        // 工場: のこぎり屋根の建屋・事務棟・タンク群・パイプラック・煙突・駐車場
       rect('#8f8c86', s, z, BLK, BLK);
       const variant = rand();
-      if (variant < 0.2) {                             // 球形のガスタンク基地（直径24〜34mの球を脚で支える）
+      if (variant < 0.12) {                            // 球形のガスタンク基地（直径24〜34mの球を脚で支える）
         rect('#9a968e', s, z, BLK, BLK);
         const n = rand() < 0.5 ? 2 : 3;
         for (let q = 0; q < n; q++) {
@@ -671,7 +705,7 @@ function genStrip(k) {
         ch.cyl.push(th(s + 36), z + 34, 0, 18, 30, 18, 0xc8ccd0);                          // 円筒のガスホルダー
         continue;
       }
-      if (variant < 0.4) {                             // 発電所: 窓のない大きなタービン建屋、煙突2〜3本、冷却塔
+      if (variant < 0.24) {                            // 発電所: 窓のない大きなタービン建屋、煙突2〜3本、冷却塔
         rect('#8a8680', s, z, BLK, BLK);
         addPlain(ch, s - 14, z - 10, 50, 64, 0, rr(22, 30), pick([0xb8bcc0, 0xa8acb0, 0xc0b8a8]));
         addPlain(ch, s - 14, z - 10, 30, 40, 26, 8, 0x8a9098);
@@ -679,7 +713,7 @@ function genStrip(k) {
         ch.cooling.push(th(s + 26), z + 28, 0, 34, rr(45, 60), 34, 0xd8d4cc);
         continue;
       }
-      if (variant < 0.6) {                             // 窓のない倉庫群（物流倉庫）
+      if (variant < 0.4) {                             // 窓のない倉庫群（物流倉庫）
         rect('#8f8c86', s, z, BLK, BLK);
         for (let q = 0; q < 2; q++) {
           const wh = rr(10, 18), x = s + (q - 0.5) * 44;
@@ -2748,7 +2782,7 @@ function buildClouds() {
 // ===== ポストエフェクト: 被写界深度（自動フォーカス）→ ブルーム → トーンマップ =====
 const post = { on: true };
 function makePost() {
-  const pr = renderer.getPixelRatio(), w = Math.floor(innerWidth * pr), h = Math.floor(innerHeight * pr);
+  const pr = renderer.getPixelRatio(), vs = viewSize(), w = Math.floor(vs.w * pr), h = Math.floor(vs.h * pr);
   post.sceneRT = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, samples: 4, depthTexture: new THREE.DepthTexture(w, h) });
   post.dofRT = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType });
   post.aoRT = new THREE.WebGLRenderTarget(w >> 1, h >> 1, { type: THREE.HalfFloatType, depthBuffer: false });
@@ -3185,8 +3219,8 @@ addEventListener('keydown', e => {
 addEventListener('keyup', e => keys.delete(e.code));
 addEventListener('blur', () => keys.clear());
 addEventListener('resize', () => {
-  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
+  camera.aspect = viewSize().w / viewSize().h; camera.updateProjectionMatrix();
+  layoutView();
   for (const k of ['sceneRT', 'dofRT', 'aoRT']) post[k].dispose();
   post.bloom.dispose();
   makePost();
@@ -3368,7 +3402,36 @@ const SHOTS = [
   { ch: 'エピローグ', t: 'また朝が来る', x: 'やがてミラーが開き、コロニーにまた朝が来るのだ。宇宙に浮かぶ小さな故郷、ネオ・ミヤギへようこそ。――ガイドはずんだもんでした。', dur: 20, night: 0, fadeIn: true, fadeOut: true,
     space: { mode: 'overview', from: { az: 1.6, tilt: 1.2, dist: 22000, tz: -1000 }, to: { az: 0.5, tilt: 1.05, dist: 34000, tz: -2000 } } },
 ];
+const SNS_SHOTS = [
+  { ch: 'L5 SPACE COLONY', t: 'ネオ・ミヤギ', x: '宇宙に浮かぶ\n長さ16kmの円筒の街', dur: 5, night: 0,
+    space: { mode: 'overview', from: { az: 0.3, tilt: 1.05, dist: 34000, tz: -2000 }, to: { az: 0.75, tilt: 1.1, dist: 27000, tz: -1500 } } },
+  { ch: 'L5 SPACE COLONY', t: '110秒で1回転', x: '回転の遠心力で\n地面に1Gの重さが生まれるのだ', dur: 4,
+    space: { mode: 'overview', from: { az: 1.6, tilt: 1.25, dist: 22000, tz: -500 }, to: { az: 2.1, tilt: 1.35, dist: 19000, tz: 0 } } },
+  { ch: '入港', t: '宇宙港へ', x: '赤い誘導灯に沿って\n中へ入るのだ', dur: 6, fadeOut: true, fadeColor: '#ffffff',
+    space: { mode: 'entrance', from: { az: 0.5, tilt: 2.75, dist: 2200, tz: ENTRY_Z - 6000 }, to: { az: 0.2, tilt: 3.05, dist: 500, tz: ENTRY_Z + 150 } } },
+  { ch: '円筒の内側', t: '空のかわりに街', x: '見上げると\n反対側の街が広がっているのだ', dur: 4, fadeIn: true, fadeColor: '#ffffff',
+    from: () => go(STRIP_PHI[0], -HL + 1800, R - 700, 0, -0.25), d: { z: 900, pitch: 0.12 } },
+  { ch: '観光名所', t: 'コロニー中央駅', x: '無重力の軸の真ん中に\nネオンの蜂の巣なのだ', dur: 5,
+    from: () => go(STRIP_PHI[0] + 0.62, HUB_Z - 750, R - 520, 0.35, 0.42), d: { yaw: 0.25, z: 120 } },
+  { ch: '昼のコロニー', t: '300万人の街', x: '円筒の内側を\nぐるりと街が囲むのだ', dur: 5,
+    from: () => go(STRIP_PHI[0] + 0.12, 600, 700, 0, -0.32), d: { z: 600, pitch: 0.1 } },
+  { ch: '街区', t: '歓楽街', x: '看板だらけの\nネオン街なのだ', dur: 4,
+    from: () => { const n = landmarks.neonSpot || landmarks.cbd[0][0]; go(STRIP_PHI[0] + (Math.round(n.s / P) * P + 6.5) / R, n.z - 150, 30, 0, 0.32); }, d: { z: 90 } },
+  { ch: '街区', t: '旧市街', x: '開拓者の街は\n今はひしめく下町なのだ', dur: 4,
+    from: () => { const r = landmarks.redev[0] || { s: 0, z: (ZONE.indEnd + ZONE.oldEnd) / 2 }; lookAt(0, r.s - 140, r.z - 160, r.s, r.z, 45, 0.85); }, d: { z: 50 } },
+  { ch: '観光名所', t: 'リング大観覧車', x: '窓のすぐそばの\n直径240mの観覧車なのだ', dur: 4,
+    from: () => { const zw = BRIDGE_Z[RESORT.bi] + 300; lookAt(1, 1470 - 60, zw - 320, 1470, zw, 60, -0.35); }, d: { z: 60, h: 8 } },
+  { ch: '夜が来る', t: 'ミラーが閉じる', x: '外のミラーが窓を覆うと\nコロニーに夜が来るのだ', dur: 8, night: 1,
+    from: () => go(STRIP_PHI[0], -1200, 1500, 0, -0.04), d: { z: 600, pitch: 0.08 } },
+  { ch: '夜のコロニー', t: '光の筒', x: '上も下も左右も\nすべてが夜景なのだ', dur: 5,
+    from: () => go(STRIP_PHI[0], -HL + 2500, R - 120, 0, 0), d: { z: 1600, yaw: 0.25 } },
+  { ch: '観光名所', t: '夜の中央駅', x: 'ネオンと光るエレベーターの\n巨大な灯台なのだ', dur: 5,
+    from: () => go(STRIP_PHI[0] + 0.25, HUB_Z - 420, R - 650, 0, 1.15), d: { yaw: 0.3, h: 50 } },
+  { ch: 'L5 SPACE COLONY', t: 'ネオ・ミヤギ', x: '宇宙に浮かぶ小さな故郷へ\nようこそなのだ', dur: 5, night: 0,
+    space: { mode: 'overview', from: { az: 1.4, tilt: 1.15, dist: 22000, tz: -1000 }, to: { az: 0.6, tilt: 1.05, dist: 32000, tz: -2000 } } },
+];
 const demo = { on: false, paused: false, i: 0, t: 0, start: null };
+const SHOTLIST = () => SNS ? SNS_SHOTS : SHOTS;
 
 // ===== BGM（WebAudio で合成）: 落ち着いたテンポのエレピ風ピアノ＋ベース＋シンセパッド、宇宙っぽい残響 =====
 const music = { on: false, timer: null, next: 0, step: 0 };
@@ -3435,7 +3498,12 @@ function setMusic(on) {
 const demoEl = { cap: el('demo-cap'), fade: el('demo-fade'), bar: el('demo-bar') };
 const ease = u => u * u * (3 - 2 * u);
 function demoStartShot(i) {
-  const sh = SHOTS[i];
+  const sh = SHOTLIST()[i];
+  if (SNS) {                                         // 上下の帯の文字を切り替える
+    const tp = el('sns-top'), bt = el('sns-bot');
+    [tp, bt].forEach(e => [...e.children].forEach(c => c.style.opacity = 0));
+    setTimeout(() => { tp.querySelector('.ch').textContent = sh.ch; tp.querySelector('.t').textContent = sh.t; bt.querySelector('.x').innerHTML = sh.x.replace(/\n/g, '<br>'); [tp, bt].forEach(e => [...e.children].forEach(c => c.style.opacity = 1)); }, 300);
+  }
   demo.i = i; demo.t = 0;
   if (sh.night !== undefined && dayNight.target !== sh.night) { dayNight.target = sh.night; dayNight.applied = false; }
   if (sh.space) {
@@ -3446,7 +3514,7 @@ function demoStartShot(i) {
   const c = demoEl.cap; c.style.opacity = 0;
   const token = demo.token = (demo.token || 0) + 1;     // 送り・戻しを連打したとき、古い字幕が遅れて出ないように
   setTimeout(() => { if (token !== demo.token) return; c.querySelector('.ch').textContent = sh.ch; c.querySelector('h2').textContent = sh.t; c.querySelector('p').textContent = sh.x; c.style.opacity = 1; }, 600);
-  el('demo-pos').textContent = `ガイドツアー ${i + 1} / ${SHOTS.length}`;
+  el('demo-pos').textContent = `ガイドツアー ${i + 1} / ${SHOTLIST().length}`;
   const white = sh.fadeColor === '#ffffff';
   demoEl.fade.style.transition = 'none'; demoEl.fade.style.background = sh.fadeIn ? (sh.fadeColor || '#000') : '#000';
   demoEl.fade.style.opacity = sh.fadeIn || i === 0 ? 1 : 0;
@@ -3456,7 +3524,7 @@ function demoStartShot(i) {
 function updateDemo(dt) {
   if (!demo.on || demo.paused) return;
   demo.t += dt;
-  const sh = SHOTS[demo.i], u = ease(Math.min(demo.t / sh.dur, 1));
+  const sh = SHOTLIST()[demo.i], u = ease(Math.min(demo.t / sh.dur, 1));
   if (sh.space) {
     for (const k of ['az', 'tilt', 'dist', 'tz']) space[k] = THREE.MathUtils.lerp(sh.space.from[k], sh.space.to[k], u);
   } else {
@@ -3470,7 +3538,7 @@ function updateDemo(dt) {
   const fadeLen = sh.fadeColor === '#ffffff' ? 2.4 : 1.0;
   if (sh.fadeOut && demo.t > sh.dur - fadeLen && demoEl.fade.style.opacity !== '1') { demoEl.fade.style.background = sh.fadeColor || '#000'; demoEl.fade.style.transition = `opacity ${fadeLen - 0.2}s`; demoEl.fade.style.opacity = 1; }
   if (demo.t > sh.dur - 0.6) demoEl.cap.style.opacity = 0;
-  if (demo.t >= sh.dur) demoStartShot((demo.i + 1) % SHOTS.length);
+  if (demo.t >= sh.dur) demoStartShot((demo.i + 1) % SHOTLIST().length);
 }
 function startDemo() {
   demo.on = true; keys.clear(); setDemoPause(false);
@@ -3489,8 +3557,8 @@ function stopDemo() {
 function setDemoPause(p) { demo.paused = p; el('demo-pause').textContent = p ? '▶' : '⏸'; el('demo-pause').title = p ? '再生（Space）' : '一時停止（Space）'; }
 function demoStep(d) {
   // 夜/昼の切り替えは途中の場面にしか書いていないので、移動先までの指定をたどって合わせる
-  const i = (demo.i + d + SHOTS.length) % SHOTS.length;
-  let night = 0; for (let k = 0; k <= i; k++) if (SHOTS[k].night !== undefined) night = SHOTS[k].night;
+  const L = SHOTLIST(), i = (demo.i + d + L.length) % L.length;
+  let night = 0; for (let k = 0; k <= i; k++) if (L[k].night !== undefined) night = L[k].night;
   if (dayNight.target !== night) { dayNight.target = night; dayNight.applied = false; }
   demoStartShot(i);
 }
@@ -3504,7 +3572,7 @@ addEventListener('keydown', e => {
     if (act) { act(); e.preventDefault(); e.stopImmediatePropagation(); }
   } else if (e.code === 'KeyG') startDemo();
 }, true);
-renderer.domElement.addEventListener('pointerdown', () => stopDemo());
+renderer.domElement.addEventListener('pointerdown', () => { if (SNS) { startAudio(); setMusic(true); } else stopDemo(); });   // SNS 版はクリックで音を出す（止めない）
 { const b = document.createElement('button'); b.textContent = '▶ ガイドツアー（G）'; b.style.borderColor = '#9fff9f'; b.style.fontWeight = '700'; b.onclick = () => { b.blur(); startDemo(); }; warp.prepend(b); }
 
 // ===== 起動 =====
@@ -3543,9 +3611,10 @@ setTimeout(() => {
   drawMinimapBase();
   PRESETS[0][1]();
   el('loading').classList.add('hidden');
-  window.__ready = true; window.__demo = demo; window.__startDemo = startDemo; window.__demoShot = demoStartShot; window.__lm = landmarks; window.__demoTitle = n => SHOTS[n] && SHOTS[n].t; window.__player = player; window.__ships = ships; window.__trains = vehicles.trains; window.__night = toggleNight; window.__space = space; window.__toggleSpace = toggleSpace; window.__viewEntrance = viewEntrance; window.__extShips = extShips; window.__post = post; window.__t = () => elapsed; window.__scene = scene; window.__axis = () => axisCarMesh;
+  window.__ready = true; window.__demo = demo; window.__startDemo = startDemo; window.__demoShot = demoStartShot; window.__lm = landmarks; window.__demoTitle = n => SHOTLIST()[n] && SHOTLIST()[n].t; window.__player = player; window.__ships = ships; window.__trains = vehicles.trains; window.__night = toggleNight; window.__space = space; window.__toggleSpace = toggleSpace; window.__viewEntrance = viewEntrance; window.__extShips = extShips; window.__post = post; window.__t = () => elapsed; window.__scene = scene; window.__axis = () => axisCarMesh;
   frame();
-  if (new URLSearchParams(location.search).has('demo')) startDemo();
+  if (SNS) document.documentElement.classList.add('sns');
+  if (new URLSearchParams(location.search).has('demo') || SNS) startDemo();
 }, 30);
 </script>
 </body>
