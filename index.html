@@ -343,9 +343,11 @@ function patch(mat, opts = {}) {
           float mx = smoothstep(wx0 - fw.x, wx0 + fw.x, f.x) - smoothstep(wx1 - fw.x, wx1 + fw.x, f.x);
           float my = smoothstep(wy0 - fw.y, wy0 + fw.y, f.y) - smoothstep(wy1 - fw.y, wy1 + fw.y, f.y);
           float m = clamp(mx, 0.0, 1.0) * clamp(my, 0.0, 1.0);
+          ${opts.vehicle ? 'const float yardT = 0.0;' : `float yardT = step(length(vCW.xy), 300.0) * step(abs(vCW.z - (${NEW_YARD_Z.toFixed(1)})), 290.0) * step(vBS.y, 90.0);`}   // 新造船所の工場の建物（背の高い事務所ビルは除く）
+          m *= mix(1.0, step(0.84, bHash(vec3(floor(g), vBId * 17.0))), yardT);   // 工場は窓がちょこちょこあるだけ
           m *= step(1.0, halfW - abs(hc)) * step(vBL.y, vBS.y - 1.0); // 角と屋上の縁には窓を作らない
           float lod = smoothstep(0.35, 0.9, max(fw.x, fw.y));
-          winMask = mix(m, 0.42, lod);
+          winMask = mix(m, mix(0.42, 0.07, yardT), lod);
           // 窓の奥の部屋（interior mapping）: 窓セルの奥に箱部屋があるとしてレイを飛ばす
           if (m > 0.01 && lod < 0.99) {
             vec3 dv = normalize(vVL);
@@ -1449,7 +1451,7 @@ function buildShipyards() {
   for (let n = 0; n < 160; n++) {                                     // 軸に張り付いた白い建物（窓があるのは2割ほど）
     const a = rand() * TAU; if (!free(a)) continue;
     const rIn = rr(62, 80), rOut = rIn + rr(20, 70), z = NEW_YARD_Z + rr(-240, 240), w = rr(14, 40), d = rr(14, 50);
-    (rand() < 0.2 ? modsWin : mods).push(a, z, R - rOut, w, rOut - rIn, d, pick([0xf2f4f6, 0xe8ecf0, 0xdfe5ea, 0xf4f1ea, 0xc8d4de]));
+    mods.push(a, z, R - rOut, w, rOut - rIn, d, pick([0xf2f4f6, 0xe8ecf0, 0xdfe5ea, 0xf4f1ea, 0xc8d4de]));
     outs.push([a, z, rOut, w, d]);
   }
   // 建物の外壁（外向きの面）に付けたタンク
@@ -1467,8 +1469,11 @@ function buildShipyards() {
       else if (rand() < 0.4) { const dd = rr(8, 14); tanks.push(a, NEW_YARD_Z + z, R - 227.5, dd, dd * rr(1.2, 2), dd, pick([0xe8e8e2, 0xd8d8d0, 0xc8ccd0])); }
     }
   }
+  for (const [a, z] of [[0.75 + Math.PI / 2 + 0.9, -150], [0.75 - 0.9, 60], [0.75 + Math.PI + 0.9, 190]]) {   // 事務所の普通のビル（背が高く、窓が並ぶ）
+    modsWin.push(a, NEW_YARD_Z + z, R - 62 - 120, 26, 120, 30, pick([0xdfe5ea, 0xc8d4de, 0x9fb4c8]));
+  }
   const crateMat = patch(new THREE.MeshStandardMaterial({ roughness: 0.7, metalness: 0.2 }));
-  scene.add(instanced(GEO.box, M.plainBld, mods, 7, { cast: false }), instanced(GEO.box, M.bld, modsWin, 7, { cast: false }), instanced(GEO.box, crateMat, crates, 7, { cast: false }),
+  scene.add(instanced(GEO.box, M.bld, mods, 7, { cast: false }), instanced(GEO.box, M.bld, modsWin, 7, { cast: false }), instanced(GEO.box, crateMat, crates, 7, { cast: false }),
     instanced(GEO.cyl, M.tank, tanks, 7, { cast: false }), instanced(GEO.sph, M.tank, spheres, 7, { cast: false }));
   // トラック: 梁の内側を走るもの（16本の梁のうち空いているもの）と、かごの中を飛ぶ無重力トラック
   yard.trucks = [];
