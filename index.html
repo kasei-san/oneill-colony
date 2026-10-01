@@ -28,7 +28,9 @@
   #demo-cap h2 { margin: 4px 0 6px; font-size: 22px; font-weight: 700; }
   #demo-cap p { margin: 0; font-size: 15px; line-height: 1.75; }
   #demo-fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; transition: opacity 0.8s; }
-  #demo-bar { position: fixed; right: 16px; bottom: 12px; color: #c8d4e2; font-size: 12px; background: rgba(6,10,20,0.6); padding: 4px 10px; border-radius: 6px; cursor: pointer; }
+  #demo-bar { position: fixed; right: 16px; bottom: 10px; color: #c8d4e2; font-size: 12px; background: rgba(6,10,20,0.65); padding: 4px 6px 4px 10px; border-radius: 8px; display: flex; align-items: center; gap: 6px; }
+  #demo-bar button { background: rgba(255,255,255,0.1); color: #e6edf5; border: 1px solid rgba(255,255,255,0.25); border-radius: 5px; min-width: 30px; height: 26px; font-size: 13px; cursor: pointer; }
+  #demo-bar button:hover { background: rgba(120,170,255,0.3); }
 </style>
 <script type="importmap">
 { "imports": {
@@ -55,7 +57,7 @@
 <div id="warp" class="panel"></div>
 <div id="demo-fade"></div>
 <div id="demo-cap"><div class="ch"></div><h2></h2><p></p></div>
-<div id="demo-bar" class="hidden"></div>
+<div id="demo-bar" class="hidden"><span id="demo-pos"></span><button id="demo-prev" title="前へ（←）">⏮</button><button id="demo-pause" title="一時停止（Space）">⏸</button><button id="demo-next" title="次へ（→）">⏭</button><button id="demo-stop" title="終了（Esc）">✕</button></div>
 <div id="mapbox" class="panel">
   <div class="cap">展開図（横=周方向 360° / 縦=軸方向）</div>
   <canvas id="minimap" width="360" height="306"></canvas>
@@ -3047,7 +3049,7 @@ const SHOTS = [
   { ch: 'エピローグ', t: 'また朝が来る', x: 'やがてミラーが開き、コロニーにまた朝が来るのだ。宇宙に浮かぶ小さな故郷、ネオ・ミヤギへようこそ。――ガイドはずんだもんでした。', dur: 20, night: 0, fadeIn: true, fadeOut: true,
     space: { mode: 'overview', from: { az: 1.6, tilt: 1.2, dist: 22000, tz: -1000 }, to: { az: 0.5, tilt: 1.05, dist: 34000, tz: -2000 } } },
 ];
-const demo = { on: false, i: 0, t: 0, start: null };
+const demo = { on: false, paused: false, i: 0, t: 0, start: null };
 
 // ===== BGM（WebAudio で合成）: 落ち着いたテンポのエレピ風ピアノ＋ベース＋シンセパッド、宇宙っぽい残響 =====
 const music = { on: false, timer: null, next: 0, step: 0 };
@@ -3123,13 +3125,14 @@ function demoStartShot(i) {
     sh.from(); demo.start = { ...player };
   }
   const c = demoEl.cap; c.style.opacity = 0;
-  setTimeout(() => { c.querySelector('.ch').textContent = sh.ch; c.querySelector('h2').textContent = sh.t; c.querySelector('p').textContent = sh.x; c.style.opacity = 1; }, 600);
-  demoEl.bar.textContent = `ガイドツアー ${i + 1} / ${SHOTS.length}　（クリックか Esc で終了）`;
+  const token = demo.token = (demo.token || 0) + 1;     // 送り・戻しを連打したとき、古い字幕が遅れて出ないように
+  setTimeout(() => { if (token !== demo.token) return; c.querySelector('.ch').textContent = sh.ch; c.querySelector('h2').textContent = sh.t; c.querySelector('p').textContent = sh.x; c.style.opacity = 1; }, 600);
+  el('demo-pos').textContent = `ガイドツアー ${i + 1} / ${SHOTS.length}`;
   demoEl.fade.style.opacity = sh.fadeIn || i === 0 ? 1 : 0;
-  if (sh.fadeIn || i === 0) setTimeout(() => { demoEl.fade.style.opacity = 0; }, 400);
+  if (sh.fadeIn || i === 0) setTimeout(() => { if (token === demo.token) demoEl.fade.style.opacity = 0; }, 400);
 }
 function updateDemo(dt) {
-  if (!demo.on) return;
+  if (!demo.on || demo.paused) return;
   demo.t += dt;
   const sh = SHOTS[demo.i], u = ease(Math.min(demo.t / sh.dur, 1));
   if (sh.space) {
@@ -3144,7 +3147,7 @@ function updateDemo(dt) {
   if (demo.t >= sh.dur) demoStartShot((demo.i + 1) % SHOTS.length);
 }
 function startDemo() {
-  demo.on = true; keys.clear();
+  demo.on = true; keys.clear(); setDemoPause(false);
   setMusic(true);
   document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden'));
   demoEl.bar.classList.remove('hidden');
@@ -3157,8 +3160,24 @@ function stopDemo() {
   demoEl.cap.style.opacity = 0; demoEl.fade.style.opacity = 0; demoEl.bar.classList.add('hidden');
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('hidden'));
 }
-demoEl.bar.addEventListener('click', stopDemo);
-addEventListener('keydown', e => { if (demo.on && (e.code === 'Escape' || e.code === 'KeyG')) { stopDemo(); e.stopImmediatePropagation(); } else if (!demo.on && e.code === 'KeyG') startDemo(); }, true);
+function setDemoPause(p) { demo.paused = p; el('demo-pause').textContent = p ? '▶' : '⏸'; el('demo-pause').title = p ? '再生（Space）' : '一時停止（Space）'; }
+function demoStep(d) {
+  // 夜/昼の切り替えは途中の場面にしか書いていないので、移動先までの指定をたどって合わせる
+  const i = (demo.i + d + SHOTS.length) % SHOTS.length;
+  let night = 0; for (let k = 0; k <= i; k++) if (SHOTS[k].night !== undefined) night = SHOTS[k].night;
+  if (dayNight.target !== night) { dayNight.target = night; dayNight.applied = false; }
+  demoStartShot(i);
+}
+el('demo-prev').onclick = e => { e.currentTarget.blur(); demoStep(-1); };
+el('demo-next').onclick = e => { e.currentTarget.blur(); demoStep(1); };
+el('demo-pause').onclick = e => { e.currentTarget.blur(); setDemoPause(!demo.paused); };
+el('demo-stop').onclick = () => stopDemo();
+addEventListener('keydown', e => {
+  if (demo.on) {
+    const act = { Escape: stopDemo, KeyG: stopDemo, Space: () => setDemoPause(!demo.paused), ArrowLeft: () => demoStep(-1), ArrowRight: () => demoStep(1) }[e.code];
+    if (act) { act(); e.preventDefault(); e.stopImmediatePropagation(); }
+  } else if (e.code === 'KeyG') startDemo();
+}, true);
 renderer.domElement.addEventListener('pointerdown', () => stopDemo());
 { const b = document.createElement('button'); b.textContent = '▶ ガイドツアー（G）'; b.style.borderColor = '#9fff9f'; b.style.fontWeight = '700'; b.onclick = () => { b.blur(); startDemo(); }; warp.prepend(b); }
 
