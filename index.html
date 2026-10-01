@@ -596,8 +596,15 @@ function genStrip(k) {
   for (let n = 0; n < 3; n++) { let s; do { s = rr(-900, 900); } while (Math.abs(s - sCenter(river)) < 250); cbds.push({ s, z: -6000 + n * 6000 + rr(-1500, 1500) }); }
   const bigParks = [];
   for (let n = 0; n < 2; n++) {
-    let i0; do { i0 = 2 + Math.floor(rand() * (NS - 7)); } while (river >= i0 - 1 && river <= i0 + 4);
-    bigParks.push({ i0, i1: i0 + 3, j0: 52 + n * 38 + Math.floor(rand() * 22), nj: 5 });   // 新市街の中（旧市街の境目より奥）
+    // 川・駅前広場（線路の交差点）・エレベーター駅のまわりの密集地と重ならない場所を選ぶ
+    let i0, j0, tries = 0;
+    do {
+      i0 = 2 + Math.floor(rand() * (NS - 7)); j0 = 52 + n * 38 + Math.floor(rand() * 22);
+      const zs = zCenter(j0) - P, ze = zCenter(j0 + 4) + P, ss = sCenter(i0) - P, se = sCenter(i0 + 3) + P;
+      var bad = (river >= i0 - 1 && river <= i0 + 4) || BRIDGE_Z.some(Z => Z > zs && Z < ze && ss < P && se > -P)
+        || [NEW_YARD_Z, HUB_Z, ZG_Z].some(Z => ze > Z - 420 && zs < Z + 420 && se > -420 && ss < 420) || (RESORT.k === k && i0 + 3 >= RESORT.i0 && j0 + 4 >= RESORT.j0 && j0 <= RESORT.j1);
+    } while (bad && ++tries < 200);
+    bigParks.push({ i0, i1: i0 + 3, j0, nj: 5 });   // 新市街の中（旧市街の境目より奥）
   }
   bigParks.forEach(p => { p.j1 = p.j0 + p.nj - 1; });
   const cbdF = (s, z) => Math.max(...cbds.map(c => Math.exp(-(((z - c.z) / 1600) ** 2) - (((s - c.s) / 650) ** 2))));
