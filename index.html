@@ -3596,7 +3596,10 @@ const SHOTS = [
     from: () => { const i = 16, sx = 4 * P + 6.5; go(STRIP_PHI[0] + sx / R, oldEndAt(0, i) - 520, 7, 0, 0.2); }, d: { z: 220, pitch: 0.06 } },   // 旧市街の路地から、境目の向こうの新市街の高層ビルを見上げる
   { ch: '街区', t: '寺社と鎮守の森', x: 'コロニーの人々は、地球から神様もいっしょに連れてきたのだ。朱色の鳥居と鎮守の森が、住宅地の中に静かにたたずんでいるのだ。', dur: 11, from: () => { const t = landmarks.samples.temple, n = t.ns || { s: t.s + 110, z: t.z }, dx = n.s - t.s, dz = n.z - t.z, L = Math.hypot(dx, dz) || 1; lookAt(t.k, t.s - dx / L * 120, t.z - dz / L * 120, t.s + dx * 0.5, t.z + dz * 0.5, 38, 0.7); }, d: { h: -6 } },  // 寺社の向こうに歓楽街
   { ch: '街区', t: '工場と倉庫街', x: '造船の町として始まったネオ・ミヤギも、今は商業と観光の街なのだ。工場は宇宙港側の端に残るだけで、のこぎり屋根の工場や倉庫が並ぶ「街の裏側」になっているのだ。', dur: 11, from: atSample('factory', 55, 60), d: { z: 60, yaw: 0.15 } },
-  { ch: '街区', t: '農業区画', x: '両端の蓋の近くには、畑とガラスの温室が広がっているのだ。最初の作物の枝豆もここで育ったのだ。300万人の食べ物の多くは、このコロニーの中で育てているのだ。', dur: 12, from: () => { const sp = landmarks.samples.farm; lookAt(sp.k, sp.s, sp.z - 80, sp.s, sp.z - 500, 55, 0.75); }, d: { z: -90, yaw: 0.12 } },   // 畑の中から蓋の方（一面の畑）を向く
+  { ch: '街区', t: '農業区画', x: '両端の蓋の近くには、畑とガラスの温室が広がっているのだ。最初の作物の枝豆もここで育ったのだ。300万人の食べ物の多くは、このコロニーの中で育てているのだ。', dur: 18, from: () => {}, d: {},
+    follow: () => {                                  // 軸の近くから横（周方向）を向いて、軸のまわりを360°ぐるりと回る
+      const u = Math.min(demo.t / SHOTLIST()[demo.i].dur, 1), e = u * u * (3 - 2 * u), th = STRIP_PHI[0] - 0.4 + TAU * e;
+      Object.assign(player, { th, z: -HL + 1150, h: R - 200, yaw: Math.PI / 2 - 0.35, pitch: -0.55 }); }, roll: 0 },   // 軸のそばから横を向く（画角が窓1枚より広いので常に畑が入る）
   { ch: '観光地', t: '大きな公園', x: '街のところどころにある大きな公園なのだ。鳥が群れで旋回し、木々が風に揺れているのだ。空の代わりに見えるのは、反対側の街なのだ。', dur: 12, from: preset('大きな公園'), d: { z: 100, pitch: 0.1 } },
   { ch: '観光地', t: '窓の上を渡る橋', x: '陸地と陸地のあいだにある窓は、全面ガラスなのだ。その上を渡る橋からは、足元のガラス越しに宇宙が見えるのだ。', dur: 13, from: preset('橋の上'), d: { th: 0.04, pitch: -0.3 } },
   { ch: '観光地', t: 'リング大観覧車と遊園地', x: '窓のすぐそばに立つ直径240mの大観覧車なのだ。駅を降りるとすぐ遊園地で、ジェットコースターやメリーゴーラウンドがにぎやかに動いているのだ。', dur: 14, from: () => {}, orbit: { k: 1, s: 1470, z: BRIDGE_Z[RESORT.bi] + 300, h: 150, r: 380, ch: 40, ch1: 90, a0: -0.9, a1: 0.3 } },   // 観覧車のまわりを回り込む
@@ -3749,7 +3752,7 @@ function demoStartShot(i) {
   if (sh.space) {
     space.on = true; space.mode = sh.space.mode; space.target = sh.space.target || null; Object.assign(space, sh.space.from); setSpaceDOF(true); envTimer = 99;
   } else {
-    space.target = null; sh.from(); demo.start = { ...player };
+    space.target = null; leaveSpace(); sh.from(); demo.start = { ...player };   // 宇宙から中へ戻す（from が go を呼ばない場面のため）
   }
   const c = demoEl.cap; c.style.opacity = 0;
   const token = demo.token = (demo.token || 0) + 1;     // 送り・戻しを連打したとき、古い字幕が遅れて出ないように
@@ -3869,7 +3872,7 @@ setTimeout(() => {
   drawMinimapBase();
   PRESETS[0][1]();
   el('loading').classList.add('hidden');
-  window.__ready = true; window.__demo = demo; window.__startDemo = startDemo; window.__demoShot = demoStartShot; window.__lm = landmarks; window.__demoTitle = n => SHOTLIST()[n] && SHOTLIST()[n].t; window.__player = player; window.__ships = ships; window.__trains = vehicles.trains; window.__night = toggleNight; window.__space = space; window.__toggleSpace = toggleSpace; window.__viewEntrance = viewEntrance; window.__extShips = extShips; window.__post = post; window.__t = () => elapsed; window.__scene = scene; window.__axis = () => axisCarMesh;
+  window.__ready = true; window.__demo = demo; window.__startDemo = startDemo; window.__demoShot = demoStartShot; window.__lm = landmarks; window.__demoTitle = n => SHOTLIST()[n] && SHOTLIST()[n].t; window.__demoDur = n => SHOTLIST()[n].dur; window.__player = player; window.__ships = ships; window.__trains = vehicles.trains; window.__night = toggleNight; window.__space = space; window.__toggleSpace = toggleSpace; window.__viewEntrance = viewEntrance; window.__extShips = extShips; window.__post = post; window.__t = () => elapsed; window.__scene = scene; window.__axis = () => axisCarMesh;
   frame(REC ? 0 : undefined);
   if (SNS) document.documentElement.classList.add('sns');
   if (REC) document.documentElement.classList.add('rec');
