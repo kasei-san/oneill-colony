@@ -178,7 +178,7 @@ scene.add(sun, sun.target);
 
 // 標準マテリアルに「位置ごとの太陽方向」「円筒用の半球環境光」などを注入する
 function patch(mat, opts = {}) {
-  const key = 'colony-' + (opts.building ? 'b' : '') + (opts.ground ? 'g' : '') + (opts.wind ? 'w' : '');
+  const key = 'colony-' + (opts.building ? 'b' : '') + (opts.ground ? 'g' : '') + (opts.wind ? 'w' : '') + (opts.vehicle ? 'v' : '');
   mat.customProgramCacheKey = () => key;
   mat.onBeforeCompile = sh => {
     sh.uniforms.uSunL = U.uSunL; sh.uniforms.uSkyAmb = U.uSkyAmb; sh.uniforms.uGndAmb = U.uGndAmb; sh.uniforms.uNight = U.uNight; sh.uniforms.uSpace = U.uSpace;
@@ -205,7 +205,7 @@ function patch(mat, opts = {}) {
         vBL = position * vBS; vBN = normal;
         { vec3 vw = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz - cameraPosition;
           vVL = vec3(dot(vw, instanceMatrix[0].xyz) / vBS.x, dot(vw, instanceMatrix[1].xyz) / vBS.y, dot(vw, instanceMatrix[2].xyz) / vBS.z);
-          vec3 q = fract(instanceMatrix[3].xyz * 0.1031); q += dot(q, q.zyx + 31.32); vBId = fract((q.x + q.y) * q.z); }` : ''}
+          ${opts.vehicle ? 'vBId = fract(float(gl_InstanceID) * 0.6180339);' : 'vec3 q = fract(instanceMatrix[3].xyz * 0.1031); q += dot(q, q.zyx + 31.32); vBId = fract((q.x + q.y) * q.z);'} }` : ''}
       ${opts.ground ? 'vDuv = duv;' : ''}`);
     let fs = `varying vec3 vCW; uniform vec3 uSunL[3]; uniform vec3 uSkyAmb; uniform vec3 uGndAmb; uniform float uNight; uniform float uSpace;
       ${opts.building ? `varying vec3 vBL; varying vec3 vBN; varying vec3 vBS; varying vec3 vVL; varying float vBId;
@@ -252,7 +252,7 @@ function patch(mat, opts = {}) {
         float winMask = 0.0; vec3 winRoom = vec3(0.0);
         // 建物ごとの色ムラと低周波の汚れ
         diffuseColor.rgb *= 0.88 + 0.22 * vBId;
-        diffuseColor.rgb *= 0.9 + 0.2 * bNoise(vCW.xy * 0.05 + vCW.z * 0.03 + vBId * 17.0);
+        ${opts.vehicle ? '' : 'diffuseColor.rgb *= 0.9 + 0.2 * bNoise(vCW.xy * 0.05 + vCW.z * 0.03 + vBId * 17.0);'}
         if (abs(vBN.y) < 0.5) {
           bool xFace = abs(vBN.x) > 0.5;
           float hc = xFace ? vBL.z : vBL.x, halfW = 0.5 * (xFace ? vBS.z : vBS.x);
@@ -406,6 +406,7 @@ M.water.normalScale.set(0.35, 0.35);
 // 環境反射: プレイヤー位置からのキューブマップ（描画中の自己参照を避けるため2枚を交互に使う）
 const envRTs = [0, 1].map(() => new THREE.WebGLCubeRenderTarget(LOW ? 128 : 256, { type: THREE.HalfFloatType }));
 const cubeCam = new THREE.CubeCamera(1, 150000, envRTs[0]);
+M.train = patch(new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0.1 }), { building: true, vehicle: true }); // 電車（窓パターンを車体に固定）
 M.detail = patch(new THREE.MeshStandardMaterial({ roughness: 0.75 }));
 M.carShape = patch(new THREE.MeshStandardMaterial({ roughness: 0.25, metalness: 0.5, vertexColors: true }));
 M.ship = patch(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0.15 }));
@@ -919,7 +920,7 @@ function build() {
   for (let k = 0; k < 3; k++) for (const dir of [-1, 1]) { const o = rand(); for (let n = 0; n < 4; n++) vehicles.trains.push({ ring: false, lane: STRIP_PHI[k] + dir * 2 / R, ph: (n + o) / 4 * (L - 400), v: 28 * dir }); }
   const trRecs = [];
   for (let n = 0; n < vehicles.trains.length * 8; n++) trRecs.push(0, 0, 0, 1, 1, 1, n % 8 === 0 ? 0xdfe6ee : 0xf4f6f8);
-  trainMesh = instanced(GEO.box, M.bld, trRecs, 7);
+  trainMesh = instanced(GEO.box, M.train, trRecs, 7);
   trainMesh.frustumCulled = false;
   scene.add(trainMesh);
 }
@@ -1242,7 +1243,7 @@ function buildAxisTrains() {
   const cols = [0xf4f5f7, 0xe8463a, 0x23a6d9, 0xf2c230];
   const recs = [];
   axisTrains.forEach((t, i) => { for (let c = 0; c < CARS; c++) recs.push(0, 0, 0, 1, 1, 1, cols[i % cols.length]); });
-  axisCarMesh = instanced(GEO.box, M.bld, recs, 7, { cast: false });
+  axisCarMesh = instanced(GEO.box, M.train, recs, 7, { cast: false });
   axisCarMesh.frustumCulled = false;
   axisStripeMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1.04, 0.16, 0.98).translate(0, 0.3, 0), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.2, 6, 9) }), axisCarMesh.count);
   axisStripeMesh.instanceMatrix = axisCarMesh.instanceMatrix; // 車体と同じ行列を共有
