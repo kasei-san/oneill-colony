@@ -623,7 +623,12 @@ function genStrip(k) {
 
   const th = s => phi + s / R;
   const rect = (col, s, z, w, d) => { g.fillStyle = col; g.fillRect(s - w / 2, z - d / 2, w, d); };
+  // エレベーター（軸の3駅）の真下のターミナルに近いほどビルを高く（多少ランダム）。上に載る部分は土台と同じ倍率
+  let hScale = 1;
+  const elevF = (s, z) => Math.max(0, ...[NEW_YARD_Z, HUB_Z, ZG_Z].map(Z => 1 - Math.hypot(s, z - Z) / 520)) ** 1.4;
   const addB = (ch, s, z, w, d, h0, h, col, flatTop = true) => {
+    if (h0 === 0) hScale = (curType === 'down' || curType === 'mid') && h > 18 ? 1 + 1.6 * elevF(s, z) * rr(0.55, 1.15) : 1;
+    h0 *= hScale; h *= hScale;
     if (neonBlk && curType !== 'oldtown' && rand() < 0.75) col = pick(PAL.cyber);   // 旧市街は看板だけ付けて色は変えない           // 歓楽街は暗め・色付きの外壁
     if (neonBlk && h0 === 0 && h >= 8) signs.push([th(s), z, w, d, h, curType === 'oldtown']);
     const rec = [th(s), z, h0, w, h, d, col];
@@ -3505,8 +3510,8 @@ const lookAt = (k, as, az, bs, bz, h, pitchK = 0.85) => go(STRIP_PHI[k] + as / R
 // 新市街（旧市街の境目より奥、+z 側の畑より手前）のオフィス街のターミナルを選ぶ
 const newTownTerm = ts => ts.find(x => x.kind === 'office' && x.z > ZONE.oldEnd + 400 && x.z < HL - 1600) || ts.find(x => x.z > ZONE.oldEnd + 400) || ts[0];
 function terminalShot() {
-  const k = 0, ts = landmarks.terminals[k], t = newTownTerm(ts);
-  lookAt(k, 150, t.z - 200, 0, t.z, 280, 1.0);              // ビルより高い位置から交差点を見下ろす
+  const k = 0, ts = landmarks.terminals[k], t = ts.find(x => x.elev && x.z === HUB_Z) || newTownTerm(ts);   // 中央駅へのエレベーターがあるターミナル
+  aimCam(STRIP_PHI[k] + 160 / R, t.z - 260, 560, new THREE.Vector3(...cyl(R - 40, STRIP_PHI[k], t.z).toArray()));   // 高層ビルの上から、駅とまっすぐ上へ伸びるエレベーターを見る
   const tr = vehicles.trains.find(x => !x.ring && x.dir > 0 && Math.abs(x.lane - STRIP_PHI[k]) < 0.01);
   if (tr && tr.stops) {
     const idS = STATIONS.axial.findIndex(z => Math.abs(z - t.z) < 1), stopU = tr.stops[idS];
@@ -3538,7 +3543,7 @@ const SHOTS = [
     from: preset('★ 無重力パーク（中心軸）'), d: { z: 200, pitch: -0.1 } },
   { ch: '街区', t: '都心のオフィス街', x: '高層ビルが立ち並ぶ都心なのだ。線路が交わるターミナル駅のまわりや、昔から栄えた場所にビルが集まっているのだ。窓の奥では今日も誰かが働いているのだ。', dur: 14,
     from: preset('都心の大通り'), d: { z: 140, h: 20 } },
-  { ch: '街区', t: 'ターミナル駅', x: '横に走る環状線と、陸地の中央を縦に走る高架線が交わる場所には、必ずターミナル駅があるのだ。オフィス街に育った駅もあれば、昔ながらの住宅地のままの駅もあるのだ。', dur: 13,
+  { ch: '街区', t: 'ターミナル駅', x: '環状線と陸地中央の高架線が交わるターミナル駅の真上からは、軸の中央駅へまっすぐ上がるエレベーターが伸びているのだ。地面の鉄道と、軸の高速電車や宇宙船がここでつながるコロニーのハブなので、エレベーターに近いほど高いビルが集まっているのだ。', dur: 13,
     from: terminalShot, d: { z: 160, h: -10 } },
   { ch: '街区', t: '歓楽街', x: '昼間は少し静かな歓楽街なのだ。ビルの壁には看板がびっしり、大型スクリーンには広告が流れているのだ。本番は夜――あとで戻ってくるのだ。', dur: 13,
     from: preset('★ 歓楽街'), d: { z: 120, h: -10 } },
