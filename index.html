@@ -593,6 +593,7 @@ function genStrip(k) {
     }
   }
   landmarks.tallest[k] = tallest;
+  (landmarks.parkRects ??= [])[k] = bigParks;
   landmarks.parks[k] = bigParks.map(p => ({ s: (sCenter(p.i0) + sCenter(p.i1)) / 2, z: (zCenter(p.j0) + zCenter(p.j1)) / 2 }));
   landmarks.cbd[k] = cbds;
   stripCanvases[k] = cv;
@@ -764,6 +765,14 @@ function build() {
   }
   for (const zb of BRIDGE_Z) for (const psi of WIN_PHI) for (const dz of [-9.2, 9.2])
     for (let a = psi - SECTOR / 2 + 20 / R; a < psi + SECTOR / 2; a += 40 / R) lampAt.push([a, zb + dz]);
+  // 大きな公園: 園路（各街区の対角線）に街灯、木のまわりを落ち着いた暖色でライトアップ
+  const glowR = [];
+  const glowCols = [0xffc98a, 0xffb877, 0xffd6a0, 0xf0b070];
+  for (let k = 0; k < 3; k++) for (const pr of landmarks.parkRects[k]) for (let i = pr.i0; i <= pr.i1; i++) for (let j = pr.j0; j <= pr.j1; j++) {
+    const sc = sCenter(i), zc = zCenter(j);
+    for (const dg of [1, -1]) for (let u = -0.42; u <= 0.42; u += 0.14) lampAt.push([STRIP_PHI[k] + (sc + u * BLK + 2.5) / R, zc + dg * u * BLK]);
+    for (let n = 0; n < 7; n++) glowR.push(STRIP_PHI[k] + (sc + rr(-0.42, 0.42) * BLK) / R, zc + rr(-0.42, 0.42) * BLK, -0.08, rr(14, 22), 1, rr(14, 22), pick(glowCols));
+  }
   const postR = [], headR = [], poolR = [];
   for (const [th, z] of lampAt) { postR.push(th, z, 0, 0.25, 7, 0.25); headR.push(th, z, 7, 0.9, 0.25, 0.55); poolR.push(th, z, -0.06, 16, 1, 16); }
   scene.add(instanced(GEO.box, M.steel, postR, 6, { color: false, cast: false }));
@@ -775,6 +784,13 @@ function build() {
   });
   lampPools = instanced(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), lampPoolMat, poolR, 6, { color: false, cast: false });
   lampPools.visible = false; lampPools.renderOrder = 2;
+  parkGlowMat = new THREE.MeshBasicMaterial({
+    map: gradientSprite([[0, 'rgba(255,255,255,1)'], [0.4, 'rgba(255,255,255,0.4)'], [1, 'rgba(255,255,255,0)']]),
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0, polygonOffset: true, polygonOffsetFactor: -2,
+  });
+  parkGlow = instanced(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), parkGlowMat, glowR, 7, { cast: false });
+  parkGlow.visible = false; parkGlow.renderOrder = 2;
+  scene.add(parkGlow);
   scene.add(lampPools);
 
   // 両端のキャップ（陸地は段々の丘、窓部分は暗いガラス）
@@ -973,6 +989,7 @@ function build() {
 let sunHalo, sunCore;
 const mirrorSun = { value: 1 }; // 夜（ミラーを閉じている）は0
 const mirrorSpace = { value: 0 }; // 宇宙からの全景で見ているときの照り返し
+let parkGlow, parkGlowMat;
 let stars, glare, carMesh, trainMesh, clouds, carLights, lampHeadMat, lampPoolMat, lampPools;
 
 // ===== 軌道エレベーター（両端の蓋に沿って、端の道路から中心の宇宙港へ上がる） =====
@@ -1607,6 +1624,7 @@ function updateDayNight(dt) {
   if (glassMeshes[0]) glassMeshes[0].material.color.setScalar(THREE.MathUtils.lerp(1, 0.03, e)); // ガラスは光を受けない素材なので手動で暗くする
   lampHeadMat.color.setRGB(0.6 + 7.4 * e, 0.6 + 5.0 * e, 0.6 + 2.6 * e);   // 夜は灯具が光る（ブルームでにじむ）
   lampPoolMat.opacity = 0.55 * e; lampPools.visible = e > 0.01;
+  parkGlowMat.opacity = 0.6 * e; parkGlow.visible = e > 0.01;
   elevLightMat.color.setRGB(0.55 + 0.5 * e, 0.6 + 2.6 * e, 0.66 + 5.4 * e);   // シャフトのレールが青白く光る
   elevCabMat.emissiveIntensity = 2.2 * e;
   dayNight.bloom = [THREE.MathUtils.lerp(0.4, 0.6, e), THREE.MathUtils.lerp(1.15, 0.85, e)];
