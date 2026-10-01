@@ -22,6 +22,13 @@
   #mapbox .cap { margin-bottom: 4px; color: #b9c4d0; }
   #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: #cfe0f5; font-size: 16px; background: #000; z-index: 10; }
   .hidden { display: none !important; }
+  #demo-cap { position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); width: min(820px, calc(100% - 32px)); color: #f2f6fb; text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+    background: linear-gradient(180deg, rgba(6,10,20,0.15), rgba(6,10,20,0.72)); border-radius: 10px; padding: 14px 20px 16px; transition: opacity 0.9s; opacity: 0; pointer-events: none; }
+  #demo-cap .ch { font-size: 12px; letter-spacing: 0.12em; color: #9fd0ff; }
+  #demo-cap h2 { margin: 4px 0 6px; font-size: 22px; font-weight: 700; }
+  #demo-cap p { margin: 0; font-size: 15px; line-height: 1.75; }
+  #demo-fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; transition: opacity 0.8s; }
+  #demo-bar { position: fixed; right: 16px; bottom: 12px; color: #c8d4e2; font-size: 12px; background: rgba(6,10,20,0.6); padding: 4px 10px; border-radius: 6px; cursor: pointer; }
 </style>
 <script type="importmap">
 { "imports": {
@@ -46,6 +53,9 @@
   </div>
 </div>
 <div id="warp" class="panel"></div>
+<div id="demo-fade"></div>
+<div id="demo-cap"><div class="ch"></div><h2></h2><p></p></div>
+<div id="demo-bar" class="hidden"></div>
 <div id="mapbox" class="panel">
   <div class="cap">展開図（横=周方向 360° / 縦=軸方向）</div>
   <canvas id="minimap" width="360" height="306"></canvas>
@@ -836,7 +846,8 @@ function build() {
         vec3 V = normalize(vGW - cameraPosition), N = normalize(vGN);
         if (dot(N, V) > 0.0) N = -N;
         float fr = clamp(0.06 + 0.94 * pow(1.0 - abs(dot(N, V)), 5.0), 0.0, 1.0) * (1.0 - uSpace); // 環境マップは内側から撮ったものなので外からは使わない
-        outgoingLight = mix(outgoingLight, textureCube(uEnv, reflect(V, N)).rgb, fr);
+        fr *= 0.6;                                     // 浅い角度で窓全体が白飛びしないよう映り込みを抑える
+        outgoingLight = mix(outgoingLight, textureCube(uEnv, reflect(V, N)).rgb * 0.8, fr);
         diffuseColor.a = max(diffuseColor.a, fr);
       }
       #include <opaque_fragment>`);
@@ -2183,7 +2194,7 @@ function updateAudio(dt) {
 }
 addEventListener('pointerdown', startAudio);
 addEventListener('keydown', e => {
-  if (e.code === 'KeyM' && audio.ctx) { audio.muted = !audio.muted; el('s-snd').textContent = audio.muted ? 'ミュート中（M で解除）' : 'ON（M でミュート）'; }
+  if (e.code === 'KeyM' && audio.ctx) { audio.muted = !audio.muted; if (music.out) music.out.gain.setTargetAtTime(music.on && !audio.muted ? 0.8 : 0, audio.ctx.currentTime, 0.3); el('s-snd').textContent = audio.muted ? 'ミュート中（M で解除）' : 'ON（M でミュート）'; }
   else startAudio();
 });
 const VTYPES = [
@@ -2983,13 +2994,182 @@ function hud(dt) {
   el('s-spd').textContent = `${(curSpeed * 3.6).toFixed(0)} km/h`;
 }
 
+// ===== ガイドツアー（デモ）: 宇宙から入港して街区と観光地をめぐり、夜景を見て、宇宙へ戻ってループする =====
+const preset = label => PRESETS.find(p => p[0].includes(label))[1];
+const atSample = key => () => { const sp = landmarks.samples[key]; go(STRIP_PHI[sp.k] + (sp.s - 80) / R, sp.z - 110, 45, 0.6, -0.32); };
+// 1ショット = 開始位置 + 移動量（d）+ 字幕。space ショットは宇宙カメラの値を from→to で動かす
+const SHOTS = [
+  { ch: 'プロローグ', t: 'L5宙域、スペースコロニー「ネオ・ミヤギ」', x: '地球と月の重力がつり合うラグランジュ点L5。直径6.4km、長さ16kmの円筒が、太陽に片側の端を向けて浮かんでいるのだ。オニール型「島3号」を手本に、2071年に建設が始まり、2089年に完成したのだ。', dur: 18,
+    space: { mode: 'overview', from: { az: 0.3, tilt: 1.05, dist: 34000, tz: -2000 }, to: { az: 1.2, tilt: 1.15, dist: 26000, tz: -1000 } }, night: 0 },
+  { ch: 'プロローグ', t: '110秒で1回転する大地', x: 'コロニーは約110秒に1回転しているのだ。内側の地面では、この回転の遠心力がちょうど地球と同じ1Gの重さを生むのだ。中に住む約300万人にとって、円筒の内側が「地面」なのだ。', dur: 15,
+    space: { mode: 'overview', from: { az: 1.2, tilt: 1.15, dist: 26000, tz: -1000 }, to: { az: 2.0, tilt: 1.4, dist: 22000, tz: 0 } } },
+  { ch: 'プロローグ', t: '6基の兄弟コロニー', x: 'L5宙域には同じ型のコロニーが6基並んでいるのだ。どれも軸を太陽に向けて回り続け、外側の3枚の巨大なミラーで太陽の光を窓から中へ送り込んでいるのだ。', dur: 15,
+    space: { mode: 'overview', from: { az: 3.5, tilt: 1.3, dist: 60000, tz: 0 }, to: { az: 4.1, tilt: 1.35, dist: 52000, tz: 0 } } },
+  { ch: 'プロローグ', t: '太陽と3枚のミラー', x: '太陽は円筒の片側の端の先にあるのだ。陸地3枚と窓3枚が交互に並び、窓の外のミラーが角度を変えて光を入れたり閉じたりすることで、中に昼と夜を作っているのだ。', dur: 15,
+    space: { mode: 'overview', from: { az: 0.4, tilt: 2.6, dist: 34000, tz: -4000 }, to: { az: 0.9, tilt: 2.5, dist: 30000, tz: -3000 } } },
+  { ch: '入港', t: '宇宙港へのアプローチ', x: '太陽と反対側の端に、宇宙船の入口があるのだ。宇宙へまっすぐ伸びる赤い誘導灯の列に沿って、ぼくたちの船もゆっくり近づいていくのだ。入口が近づくと、船は噴射を絞っていくのだ。', dur: 22, fadeOut: true,
+    space: { mode: 'entrance', from: { az: 0.5, tilt: 2.75, dist: 2600, tz: ENTRY_Z - 9000 }, to: { az: 0.2, tilt: 3.05, dist: 500, tz: ENTRY_Z + 150 } } },
+  { ch: '入港', t: '無重力の中心軸へ', x: '入口を抜けると、そこは円筒の中心軸なのだ。軸の近くは回転の影響がほとんどなく、無重力なのだ。貨物船や旅客船、そして時速1000kmの高速電車が、両端の宇宙港のあいだを行き来しているのだ。', dur: 18, fadeIn: true,
+    from: preset('宇宙港の出口'), d: { z: 1600, yaw: -0.1, pitch: -0.05 } },
+  { ch: '円筒の内側', t: '頭上にも街がある世界', x: '見上げると、反対側の陸地が空のかわりに広がっているのだ。遠くの街ほど空気に霞んで、地面が両側からせり上がっていく――ここが円筒の中だと実感できる眺めなのだ。', dur: 16,
+    from: () => go(STRIP_PHI[0], -HL + 1800, R - 700, 0, -0.25), d: { z: 1200, pitch: 0.15 } },
+  { ch: '観光地', t: 'コロニー中央駅', x: '中心軸のちょうど真ん中に、構造物が蜂の巣のように寄り集まった中央駅があるのだ。地面からは自転車のスポークのように6本のエレベーターが伸び、ネオン看板と赤い警告灯がまたたく、コロニー随一の独特な景観なのだ。', dur: 16,
+    from: preset('中心軸の駅（間近）'), d: { yaw: 0.25, z: 120 } },
+  { ch: '観光地', t: '無重力パーク', x: '中心軸を包む直径500mのガラスの球なのだ。木の生えた浮島や水の玉のあいだを、人々が泳ぐように漂って遊んでいるのだ。軸の高速電車もここで止まるのだ。', dur: 15,
+    from: preset('★ 無重力パーク（中心軸）'), d: { z: 200, pitch: -0.1 } },
+  { ch: '街区', t: '都心のオフィス街', x: '高層ビルが立ち並ぶ都心なのだ。線路が交わるターミナル駅のまわりや、昔から栄えた場所にビルが集まっているのだ。窓の奥では今日も誰かが働いているのだ。', dur: 14,
+    from: preset('都心の大通り'), d: { z: 140, h: 20 } },
+  { ch: '街区', t: 'ターミナル駅', x: '横に走る環状線と、陸地の中央を縦に走る高架線が交わる場所には、必ずターミナル駅があるのだ。オフィス街に育った駅もあれば、昔ながらの住宅地のままの駅もあるのだ。', dur: 13,
+    from: preset('ターミナル駅'), d: { yaw: 0.3, z: 60 } },
+  { ch: '街区', t: '歓楽街', x: '昼間は少し静かな歓楽街なのだ。ビルの壁には看板がびっしり、大型スクリーンには広告が流れているのだ。本番は夜――あとで戻ってくるのだ。', dur: 13,
+    from: preset('★ 歓楽街'), d: { z: 120, h: -10 } },
+  { ch: '街区', t: '商店街', x: '発展しなかった駅の前には、アーケードのかかった昔ながらの商店街が残っているのだ。色とりどりの小さな店が並び、いつも人でにぎわっているのだ。', dur: 12, from: atSample('shop'), d: { z: 80, yaw: 0.2 } },
+  { ch: '街区', t: '学校', x: '住宅地のあちこちに学校があるのだ。茶色いグラウンドとプールが、上から見ると街のいい目印になるのだ。', dur: 11, from: atSample('school'), d: { z: 70, yaw: 0.2 } },
+  { ch: '街区', t: '寺社と鎮守の森', x: 'コロニーの人々は、地球から神様もいっしょに連れてきたのだ。朱色の鳥居と鎮守の森が、住宅地の中に静かにたたずんでいるのだ。', dur: 11, from: atSample('temple'), d: { z: 70, yaw: 0.2 } },
+  { ch: '街区', t: '団地と病院・大学', x: '同じ形の団地が並ぶ地区や、中庭を囲む病院・大学のキャンパスもあるのだ。都心と住宅地のあいだを、こうした街がなめらかにつないでいるのだ。', dur: 11, from: atSample('danchi'), d: { z: 70, yaw: 0.2 } },
+  { ch: '街区', t: '工場と倉庫街', x: '窓際には、コロニーの暮らしを支える工場や倉庫が集まっているのだ。トラックが行き交う「街の裏側」なのだ。', dur: 11, from: atSample('factory'), d: { z: 70, yaw: 0.2 } },
+  { ch: '街区', t: '農業区画', x: '両端の蓋の近くには、畑とガラスの温室が広がっているのだ。300万人の食べ物の多くは、このコロニーの中で育てているのだ。', dur: 12, from: atSample('farm'), d: { z: 90, yaw: 0.2 } },
+  { ch: '観光地', t: '川沿いの屋台通り', x: '陸地を縦に流れる川の岸には遊歩道があり、屋台がずらりと並ぶ一角があるのだ。提灯の下で、川風に吹かれながら食べ歩きを楽しめるのだ。', dur: 13, from: preset('川沿い'), d: { z: 150 } },
+  { ch: '観光地', t: '大きな公園', x: '街のところどころにある大きな公園なのだ。鳥が群れで旋回し、木々が風に揺れているのだ。空の代わりに見えるのは、反対側の街なのだ。', dur: 12, from: preset('大きな公園'), d: { z: 100, pitch: 0.1 } },
+  { ch: '観光地', t: '窓の上を渡る橋', x: '陸地と陸地のあいだにある窓は、全面ガラスなのだ。その上を渡る橋からは、足元のガラス越しに宇宙が見えるのだ。', dur: 13, from: preset('橋の上'), d: { th: 0.04, pitch: -0.3 } },
+  { ch: '観光地', t: 'リング大観覧車と遊園地', x: '窓のすぐそばに立つ直径240mの大観覧車なのだ。駅を降りるとすぐ遊園地で、ジェットコースターやメリーゴーラウンドがにぎやかに動いているのだ。', dur: 14, from: preset('リング大観覧車'), d: { z: 120, yaw: 0.15 } },
+  { ch: '観光地', t: '蓋をのぼるエレベーター', x: '両端の蓋には、地面から中心の宇宙港へまっすぐ上がるエレベーターが並んでいるのだ。上に行くほど体が軽くなり、終点ではふわりと浮いてしまうのだ。', dur: 13,
+    from: () => go(STRIP_PHI[0], -HL + 1300, 160, Math.PI, 0.55), d: { z: -300, h: 200 } },
+  { ch: '夜', t: 'ミラーが閉じて、夜が来る', x: '夕方になると、外の3枚のミラーがゆっくり窓に閉じていくのだ。差し込む光が消えて、コロニーに夜が訪れるのだ。', dur: 16, night: 1,
+    from: preset('上空 1500m'), d: { z: 900, pitch: 0.2 } },
+  { ch: '夜', t: '光の筒', x: '夜のコロニーを中心軸から眺めると、窓明かりと街灯と車の光の流れが、円筒の内側をぐるりと埋め尽くすのだ。ここでしか見られない、上下左右すべてが夜景の世界なのだ。', dur: 18,
+    from: () => go(STRIP_PHI[0], -HL + 2500, R - 120, 0, 0), d: { z: 2200, yaw: 0.3 } },
+  { ch: '夜', t: '目を覚ます歓楽街', x: '昼間は静かだった歓楽街が、夜になると一気に目を覚ますのだ。ネオン看板と広告スクリーンが道路まで色とりどりに染めるのだ。', dur: 15, from: preset('★ 歓楽街'), d: { z: 160, h: -12 } },
+  { ch: '夜', t: '提灯の灯る川辺', x: '屋台通りでは提灯がともり、水面に光が揺れているのだ。', dur: 12, from: preset('川沿い'), d: { z: 150 } },
+  { ch: '夜', t: '夜の中央駅', x: '夜の中央駅は、ネオンの塊から光るエレベーターが放射状に伸びる、まるで巨大な灯台なのだ。', dur: 14, from: preset('中心軸の駅（見上げる）'), d: { yaw: 0.3 } },
+  { ch: '夜', t: '虹色の観覧車', x: '観覧車の外周には虹色の光が流れ、遊園地の夜はまだまだ終わらないのだ。', dur: 13, from: preset('リング大観覧車'), d: { z: 120, yaw: 0.15 } },
+  { ch: '夜', t: 'ライトアップされた公園', x: '公園では、暖かな光が木々を足元から照らしているのだ。頭上には反対側の街の灯りが、星空のかわりに広がっているのだ。', dur: 13, from: preset('大きな公園'), d: { z: 100, pitch: 0.15 } },
+  { ch: 'エピローグ', t: 'また朝が来る', x: 'やがてミラーが開き、コロニーにまた朝が来るのだ。宇宙に浮かぶ小さな故郷、ネオ・ミヤギへようこそ。――ガイドはずんだもんでした。', dur: 20, night: 0, fadeIn: true, fadeOut: true,
+    space: { mode: 'overview', from: { az: 1.6, tilt: 1.2, dist: 22000, tz: -1000 }, to: { az: 0.5, tilt: 1.05, dist: 34000, tz: -2000 } } },
+];
+const demo = { on: false, i: 0, t: 0, start: null };
+
+// ===== BGM（WebAudio で合成）: 落ち着いたテンポのエレピ風ピアノ＋ベース＋シンセパッド、宇宙っぽい残響 =====
+const music = { on: false, timer: null, next: 0, step: 0 };
+const midi = n => 440 * Math.pow(2, (n - 69) / 12);
+// コード進行（各2小節）: Fmaj9 → Em7 → Dm9 → Cmaj9 → Am9 → Fmaj7#11 → Gsus4 → G
+const PROG = [[41, [57, 60, 64, 67, 69]], [40, [55, 59, 62, 64, 67]], [38, [57, 60, 62, 65, 69]], [36, [55, 59, 62, 64, 67]],
+  [45, [55, 60, 64, 67, 71]], [41, [57, 59, 64, 67, 69]], [43, [55, 60, 62, 67, 72]], [43, [55, 59, 62, 67, 71]]];
+function musicNodes() {
+  const ctx = audio.ctx;
+  if (music.out) return music;
+  music.out = ctx.createGain(); music.out.gain.value = 0;
+  const delay = ctx.createDelay(1.5), fb = ctx.createGain(), wet = ctx.createGain(), lp = ctx.createBiquadFilter();
+  delay.delayTime.value = 60 / 70 * 0.75; fb.gain.value = 0.42; wet.gain.value = 0.35; lp.type = 'lowpass'; lp.frequency.value = 2400;
+  music.bus = ctx.createGain(); music.bus.connect(music.out); music.bus.connect(delay); delay.connect(lp); lp.connect(fb); fb.connect(delay); lp.connect(wet); wet.connect(music.out);
+  music.out.connect(ctx.destination);
+  return music;
+}
+function epiano(t, note, vel, len) {                  // エレピ: サイン＋少しだけ倍音、速い立ち上がりと長い減衰
+  const ctx = audio.ctx, f = midi(note), g = ctx.createGain();
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vel, t + 0.008); g.gain.exponentialRampToValueAtTime(vel * 0.25, t + 0.4); g.gain.exponentialRampToValueAtTime(0.0004, t + len);
+  for (const [mul, a, det] of [[1, 1, 0], [2, 0.18, 3], [3.01, 0.05, -4]]) {
+    const o = ctx.createOscillator(), og = ctx.createGain(); o.type = 'sine'; o.frequency.value = f * mul; o.detune.value = det; og.gain.value = a;
+    o.connect(og); og.connect(g); o.start(t); o.stop(t + len + 0.05);
+  }
+  g.connect(music.bus);
+}
+function bass(t, note, len) {                         // ベース: 三角波を低域フィルタで丸く
+  const ctx = audio.ctx, o = ctx.createOscillator(), g = ctx.createGain(), f = ctx.createBiquadFilter();
+  o.type = 'triangle'; o.frequency.value = midi(note); f.type = 'lowpass'; f.frequency.value = 380;
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.32, t + 0.02); g.gain.exponentialRampToValueAtTime(0.12, t + len * 0.7); g.gain.linearRampToValueAtTime(0, t + len);
+  o.connect(f); f.connect(g); g.connect(music.out); o.start(t); o.stop(t + len + 0.05);
+}
+function pad(t, notes, len) {                         // パッド: 少しずらしたノコギリ波を、ゆっくり開くフィルタで（未来的な空気感）
+  const ctx = audio.ctx, g = ctx.createGain(), f = ctx.createBiquadFilter();
+  f.type = 'lowpass'; f.Q.value = 2; f.frequency.setValueAtTime(300, t); f.frequency.linearRampToValueAtTime(1300, t + len * 0.5); f.frequency.linearRampToValueAtTime(400, t + len);
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.035, t + len * 0.35); g.gain.linearRampToValueAtTime(0, t + len + 0.5);
+  for (const n of notes) for (const det of [-9, 9]) { const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = midi(n); o.detune.value = det; o.connect(f); o.start(t); o.stop(t + len + 0.6); }
+  f.connect(g); g.connect(music.bus);
+}
+function scheduleMusic() {
+  const ctx = audio.ctx, beat = 60 / 70;
+  while (music.next < ctx.currentTime + 0.4) {
+    const t = music.next, st = music.step, bar = Math.floor(st / 8), [root, ch] = PROG[Math.floor(bar / 2) % PROG.length], e = st % 8;
+    if (st % 16 === 0) pad(t, [ch[0], ch[2], ch[4]], beat * 8);
+    if (e === 0) bass(t, root, beat * 1.8);
+    if (e === 4) bass(t, root + (bar % 2 ? 7 : 0), beat * 1.6);
+    if (e === 7 && rand() < 0.5) bass(t, root + 12, beat * 0.45);
+    // ピアノ: 1拍目に和音、あとはまばらなアルペジオ
+    if (e === 0) ch.slice(0, 4).forEach((n, i) => epiano(t + i * 0.025, n, 0.07, beat * 3));
+    else if ([2, 3, 5, 6].includes(e) && rand() < 0.55) epiano(t, ch[Math.floor(rand() * ch.length)] + (rand() < 0.3 ? 12 : 0), 0.05 + rand() * 0.03, beat * 2);
+    music.next += beat / 2; music.step++;
+  }
+}
+function setMusic(on) {
+  if (!audio.ctx) startAudio();
+  if (!audio.ctx) return;
+  musicNodes();
+  const now = audio.ctx.currentTime;
+  music.out.gain.cancelScheduledValues(now); music.out.gain.setTargetAtTime(on && !audio.muted ? 0.8 : 0, now, 1.2);
+  if (on && !music.timer) { music.next = now + 0.1; music.timer = setInterval(scheduleMusic, 100); }
+  if (!on && music.timer) { const tm = music.timer; music.timer = null; setTimeout(() => { if (!music.timer) clearInterval(tm); }, 4000); }
+  music.on = on;
+}
+const demoEl = { cap: el('demo-cap'), fade: el('demo-fade'), bar: el('demo-bar') };
+const ease = u => u * u * (3 - 2 * u);
+function demoStartShot(i) {
+  const sh = SHOTS[i];
+  demo.i = i; demo.t = 0;
+  if (sh.night !== undefined && dayNight.target !== sh.night) { dayNight.target = sh.night; dayNight.applied = false; }
+  if (sh.space) {
+    space.on = true; space.mode = sh.space.mode; Object.assign(space, sh.space.from); setSpaceDOF(true); envTimer = 99;
+  } else {
+    sh.from(); demo.start = { ...player };
+  }
+  const c = demoEl.cap; c.style.opacity = 0;
+  setTimeout(() => { c.querySelector('.ch').textContent = sh.ch; c.querySelector('h2').textContent = sh.t; c.querySelector('p').textContent = sh.x; c.style.opacity = 1; }, 600);
+  demoEl.bar.textContent = `ガイドツアー ${i + 1} / ${SHOTS.length}　（クリックか Esc で終了）`;
+  demoEl.fade.style.opacity = sh.fadeIn || i === 0 ? 1 : 0;
+  if (sh.fadeIn || i === 0) setTimeout(() => { demoEl.fade.style.opacity = 0; }, 400);
+}
+function updateDemo(dt) {
+  if (!demo.on) return;
+  demo.t += dt;
+  const sh = SHOTS[demo.i], u = ease(Math.min(demo.t / sh.dur, 1));
+  if (sh.space) {
+    for (const k of ['az', 'tilt', 'dist', 'tz']) space[k] = THREE.MathUtils.lerp(sh.space.from[k], sh.space.to[k], u);
+  } else {
+    const d = sh.d || {}, s0 = demo.start;
+    player.th = s0.th + (d.th || 0) * u; player.z = s0.z + (d.z || 0) * u; player.h = s0.h + (d.h || 0) * u;
+    player.yaw = s0.yaw + (d.yaw || 0) * u; player.pitch = s0.pitch + (d.pitch || 0) * u;
+  }
+  if (sh.fadeOut && demo.t > sh.dur - 1.0) demoEl.fade.style.opacity = 1;
+  if (demo.t > sh.dur - 0.6) demoEl.cap.style.opacity = 0;
+  if (demo.t >= sh.dur) demoStartShot((demo.i + 1) % SHOTS.length);
+}
+function startDemo() {
+  demo.on = true; keys.clear();
+  setMusic(true);
+  document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden'));
+  demoEl.bar.classList.remove('hidden');
+  demoStartShot(0);
+}
+function stopDemo() {
+  if (!demo.on) return;
+  demo.on = false;
+  setMusic(false);
+  demoEl.cap.style.opacity = 0; demoEl.fade.style.opacity = 0; demoEl.bar.classList.add('hidden');
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('hidden'));
+}
+demoEl.bar.addEventListener('click', stopDemo);
+addEventListener('keydown', e => { if (demo.on && (e.code === 'Escape' || e.code === 'KeyG')) { stopDemo(); e.stopImmediatePropagation(); } else if (!demo.on && e.code === 'KeyG') startDemo(); }, true);
+renderer.domElement.addEventListener('pointerdown', () => stopDemo());
+{ const b = document.createElement('button'); b.textContent = '▶ ガイドツアー（G）'; b.style.borderColor = '#9fff9f'; b.style.fontWeight = '700'; b.onclick = () => { b.blur(); startDemo(); }; warp.prepend(b); }
+
 // ===== 起動 =====
 const clock = new THREE.Clock();
 let elapsed = 0, frameNo = 0;
 function frame() {
   const dt = Math.min(clock.getDelta(), 0.1);
   elapsed += dt;
-  if (space.on) updateSpaceCamera(); else { updatePlayer(dt); updateCamera(); }
+  updateDemo(dt);
+  if (space.on) updateSpaceCamera(); else { if (!demo.on) updatePlayer(dt); updateCamera(); }
   updateSpace(elapsed);
   updateLOD();
   updateVehicles(elapsed);
@@ -3018,8 +3198,9 @@ setTimeout(() => {
   drawMinimapBase();
   PRESETS[0][1]();
   el('loading').classList.add('hidden');
-  window.__ready = true; window.__player = player; window.__ships = ships; window.__trains = vehicles.trains; window.__night = toggleNight; window.__space = space; window.__toggleSpace = toggleSpace; window.__viewEntrance = viewEntrance; window.__extShips = extShips; window.__post = post; window.__t = () => elapsed; window.__scene = scene; window.__axis = () => axisCarMesh;
+  window.__ready = true; window.__demo = demo; window.__startDemo = startDemo; window.__demoShot = demoStartShot; window.__player = player; window.__ships = ships; window.__trains = vehicles.trains; window.__night = toggleNight; window.__space = space; window.__toggleSpace = toggleSpace; window.__viewEntrance = viewEntrance; window.__extShips = extShips; window.__post = post; window.__t = () => elapsed; window.__scene = scene; window.__axis = () => axisCarMesh;
   frame();
+  if (new URLSearchParams(location.search).has('demo')) startDemo();
 }, 30);
 </script>
 </body>
