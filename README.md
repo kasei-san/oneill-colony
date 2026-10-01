@@ -43,6 +43,7 @@ python3 -m http.server 8917
 - `index.html` — 本体（HTML・CSS・JS が1ファイル）
 - `docs/research.md` — 低ポリゴンで広い世界をきれいに見せる手法の調査メモ
 - `docs/history.md` — コロニー「ネオ・ミヤギ」の架空の歴史・地区のエピソード（ガイドツアーの設定のもと）
+- `history.html` — `docs/history.md` を読み込んで表示するページ（http://localhost:8917/history.html）
 - `tools/check.mjs` — ヘッドレス Chrome での動作確認スクリプト（下記）
 
 ## 動作確認
