@@ -186,7 +186,7 @@ function patch(mat, opts = {}) {
   mat.customProgramCacheKey = () => key;
   mat.onBeforeCompile = sh => {
     sh.uniforms.uSunL = U.uSunL; sh.uniforms.uSkyAmb = U.uSkyAmb; sh.uniforms.uGndAmb = U.uGndAmb; sh.uniforms.uNight = U.uNight; sh.uniforms.uSpace = U.uSpace;
-    if (opts.ground) sh.uniforms.uDetail = U.uDetail;
+    if (opts.ground) { sh.uniforms.uDetail = U.uDetail; sh.uniforms.uNeon = { value: mat.userData.neon }; }
     if (opts.carGlow) {
       sh.vertexShader = 'attribute vec3 aGlow; varying vec3 vGlow;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vGlow = aGlow;');
       sh.fragmentShader = 'varying vec3 vGlow;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n totalEmissiveRadiance += vGlow * (0.3 + 5.0 * uNight);');
@@ -233,7 +233,7 @@ function patch(mat, opts = {}) {
         float bHash(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
         float bNoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
           return mix(mix(bHash(vec3(i, 0.0)), bHash(vec3(i + vec2(1, 0), 0.0)), f.x), mix(bHash(vec3(i + vec2(0, 1), 0.0)), bHash(vec3(i + vec2(1, 1), 0.0)), f.x), f.y); }` : ''}
-      ${opts.ground ? 'uniform sampler2D uDetail; varying vec2 vDuv;' : ''}
+      ${opts.ground ? 'uniform sampler2D uDetail; uniform sampler2D uNeon; varying vec2 vDuv;' : ''}
       vec3 colonySunDir() {
         float ang = atan(vCW.y, vCW.x);
         float k = mod(floor((ang + 0.5235988) / 2.0943951), 3.0);
@@ -260,6 +260,12 @@ function patch(mat, opts = {}) {
           float along = fd.x < fd.y ? vDuv.y : vDuv.x;
           float lamp = pow(0.5 + 0.5 * cos(along * 6.2832 * 4.4), 6.0); // 約25mおきの街灯の光だまり
           totalEmissiveRadiance += uNight * road * (0.03 + 0.35 * lamp) * vec3(1.0, 0.72, 0.4) * mix(1.0, 0.2, uSpace);
+          // 歓楽街: 道路がピンク〜水色のネオンに染まる
+          float neon = texture2D(uNeon, vec2((vDuv.x + ${(NS / 2).toFixed(1)}) / ${NS.toFixed(1)}, (vDuv.y + ${((NZ - 1) / 2).toFixed(1)}) / ${NZ.toFixed(1)})).r;
+          if (neon > 0.01) {
+            vec3 nc = mix(vec3(1.0, 0.15, 0.7), vec3(0.1, 0.8, 1.0), 0.5 + 0.5 * sin(vDuv.x * 2.1 + vDuv.y * 1.7));
+            totalEmissiveRadiance += uNight * neon * nc * (road * (0.22 + 0.55 * lamp) + 0.05) * mix(1.0, 0.3, uSpace);
+          }
         }`);
       fs = fs.replace('#include <map_fragment>', `#include <map_fragment>
         { vec4 dt = texture2D(uDetail, vDuv);
@@ -472,6 +478,7 @@ const GEO = {
 const PAL = {
   office: [0xcdc9c1, 0xb7b9bd, 0xd9d3c5, 0xa3abb4, 0x8b9aac, 0xe4e0d8, 0xaca69b],
   glass: [0x6c8298, 0x5a6f88, 0x7c93a7, 0x8aa1b2, 0x4f6478],
+  cyber: [0x3a3f4a, 0x2e3340, 0x4a3d52, 0x3d4a55, 0x55505a, 0x2a2f38, 0x5a4a4a, 0x384858],
   house: [0xf1ece1, 0xe6dccb, 0xd9cfbd, 0xcac3b6, 0xf4f1eb, 0xd8c6a8, 0xbfc8cc],
   roof: [0x55514c, 0x7a4033, 0x4a5866, 0x8a5b3d, 0x3d4045, 0x67704f],
   tree: [0x4b7733, 0x5a873a, 0x3c672f, 0x6a8e44, 0x4f7f3f],
@@ -511,10 +518,16 @@ function genStrip(k) {
   bigParks.forEach(p => { p.j1 = p.j0 + p.nj - 1; });
   const cbdF = (s, z) => Math.max(...cbds.map(c => Math.exp(-(((z - c.z) / 1600) ** 2) - (((s - c.s) / 650) ** 2))));
   let tallest = { h: 0 };
+  const neonC = Array.from({ length: 18 }, () => ({ s: rr(-1300, 1300), z: rr(-7600, 7600), r: rr(380, 560) }));
+  const neonMap = new Uint8Array(NS * NZ * 4);
+  let neonBlk = false;
+  const signs = (landmarks.neonSigns ??= [])[k] = [];
 
   const th = s => phi + s / R;
   const rect = (col, s, z, w, d) => { g.fillStyle = col; g.fillRect(s - w / 2, z - d / 2, w, d); };
   const addB = (ch, s, z, w, d, h0, h, col, flatTop = true) => {
+    if (neonBlk && rand() < 0.75) col = pick(PAL.cyber);           // 歓楽街は暗め・色付きの外壁
+    if (neonBlk && h0 === 0 && h >= 8) signs.push([th(s), z, w, d, h]);
     const rec = [th(s), z, h0, w, h, d, col];
     ch.bld.push(...rec);
     if (h0 + h >= 20) ch.far.push(...rec);
@@ -546,6 +559,8 @@ function genStrip(k) {
     else if (rand() < 0.3 + 0.35 * (1 - c) + cb * 0.3) type = 'mid';
     else type = 'res';
     blockTypes[k][i * NZ + j] = type;
+    neonBlk = (type === 'down' || type === 'mid') && neonC.some(c => Math.hypot(s - c.s, z - c.z) < c.r);
+    if (neonBlk) neonMap[(j * NS + i) * 4] = 255;
 
     if (type === 'resort') {                          // 駐車場（アスファルト）とレジャー施設の舗装・植え込み
       const lot = j === 36 && (i === NS - 4 || i === NS - 3);   // 駅前の2ブロックだけ駐車場
@@ -612,6 +627,16 @@ function genStrip(k) {
     }
   }
   landmarks.tallest[k] = tallest;
+  if (k === 0) {                                                    // 歓楽街のワープ先: まわりに歓楽街の都心・中層ブロックが一番多い場所
+    let best = -1;
+    for (let i = 1; i < NS - 1; i++) for (let j = 1; j < NZ - 1; j++) {
+      if (!neonMap[(j * NS + i) * 4]) continue;
+      let n = 0; for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) n += neonMap[((j + b) * NS + i + a) * 4] ? (blockTypes[k][(i + a) * NZ + j + b] === 'down' ? 2 : 1) : 0;
+      if (n > best) { best = n; landmarks.neonSpot = { s: sCenter(i), z: zCenter(j) }; }
+    }
+  }
+  const nt = new THREE.DataTexture(neonMap, NS, NZ); nt.magFilter = nt.minFilter = THREE.LinearFilter; nt.needsUpdate = true;
+  (landmarks.neonTex ??= [])[k] = nt;
   (landmarks.parkRects ??= [])[k] = bigParks;
   bigParks.forEach((pr, n) => {
     const c = Math.atan2(Math.sin(phi), Math.cos(phi));          // atan と同じ -π〜π の範囲
@@ -702,6 +727,7 @@ function build() {
     const tex = new THREE.CanvasTexture(stripCanvases[k]);
     tex.colorSpace = THREE.SRGBColorSpace; tex.flipY = false; tex.anisotropy = ANISO;
     const mat = patch(new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 }), { ground: true });
+    mat.userData.neon = landmarks.neonTex[k];
     const mesh = new THREE.Mesh(stripPatch(R, STRIP_PHI[k], (s, z, u, v) => [u, v], true), mat);
     mesh.receiveShadow = true;
     scene.add(mesh);
@@ -720,6 +746,7 @@ function build() {
     lodChunks.push({ center: cyl(R, STRIP_PHI[c.k] + sMid / R, zMid), near, far, src: c, detail: null, seed: lodChunks.length + 1 });
   }
   scene.add(instanced(GEO.box, M.water, waterRecs, 6, { cast: false, color: false }));
+  buildNeonSigns();
 
   // 窓ガラス（遠くほど霧で不透明化 = 大気越しの空色）
   const [gc, gg] = canvas(128, 128);
@@ -1391,7 +1418,71 @@ function buildRiverside() {
   lanternMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.75, 0.22, 0.12) });
   scene.add(instanced(new THREE.SphereGeometry(0.5, 8, 6).translate(0, 0.5, 0), lanternMat, lanterns, 6, { color: false, cast: false }));
 }
+// 歓楽街のネオン看板: 横長の文字看板（壁・屋上）と縦長の袖看板（壁から突き出す）を1枚の画像にまとめて貼る
+let neonDistrictMat;
+function buildNeonSigns() {
+  const [ac, ag] = canvas(1024, 1024);
+  const cols = ['#ff4fd8', '#7ff9ff', '#ffcc33', '#ff5a3c', '#b6ff4a', '#4ab0ff', '#ff7ae0', '#4dff9c'];
+  const hz = ['BAR', 'KARAOKE', 'ホテル', '居酒屋', 'ラーメン', 'CLUB', 'GAME', '焼肉', 'カラオケ', 'スナック', '24H', 'NEON', '寿司', '占い', 'DANCE', '麻雀'];
+  const vt = ['居酒屋', 'カラオケ', 'ラーメン', '焼肉', 'スナック', '酒場', 'ホテル', '麻雀', '占い', '寿司', 'ゲーム', 'バー', '銭湯', '喫茶', '質屋', '餃子'];
+  const glowText = (t, x, y, size, c) => {
+    ag.font = `bold ${size}px "Hiragino Sans", sans-serif`; ag.textAlign = 'center'; ag.textBaseline = 'middle';
+    ag.shadowColor = c; ag.shadowBlur = 14; ag.fillStyle = c; ag.fillText(t, x, y); ag.shadowBlur = 0; ag.globalAlpha = 0.6; ag.fillStyle = '#fff'; ag.fillText(t, x, y); ag.globalAlpha = 1;
+  };
+  hz.forEach((t, i) => {                                           // 上半分: 横長 256x128 を 4x4
+    const x = (i % 4) * 256, y = Math.floor(i / 4) * 128, c = cols[i % cols.length];
+    ag.fillStyle = 'rgba(10,6,20,0.9)'; ag.fillRect(x + 6, y + 10, 244, 108);
+    ag.strokeStyle = c; ag.lineWidth = 4; ag.shadowColor = c; ag.shadowBlur = 12; ag.strokeRect(x + 12, y + 16, 232, 96); ag.shadowBlur = 0;
+    glowText(t, x + 128, y + 64, t.length > 5 ? 34 : 48, c);
+  });
+  vt.forEach((t, i) => {                                           // 下半分: 縦長 64x512 を 16本
+    const x = i * 64, y = 512, c = cols[(i + 3) % cols.length];
+    ag.fillStyle = 'rgba(10,6,20,0.9)'; ag.fillRect(x + 4, y + 8, 56, 496);
+    ag.strokeStyle = c; ag.lineWidth = 3; ag.shadowColor = c; ag.shadowBlur = 10; ag.strokeRect(x + 8, y + 12, 48, 488); ag.shadowBlur = 0;
+    [...t].forEach((ch, n) => glowText(ch, x + 32, y + 60 + n * (400 / Math.max(3, t.length)), 40, c));
+  });
+  const atlas = new THREE.CanvasTexture(ac); atlas.colorSpace = THREE.SRGBColorSpace; atlas.anisotropy = ANISO;
+  const pos = [], uv = [], idx = [];
+  const quad = (c, ax, ay, u0, v0, u1, v1) => {
+    const b = pos.length / 3;
+    for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) pos.push(c.x + ax.x * sx + ay.x * sy, c.y + ax.y * sx + ay.y * sy, c.z + ax.z * sx + ay.z * sy);
+    uv.push(u0, v0, u1, v0, u1, v1, u0, v1); idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+  };
+  const hUV = () => { const i = Math.floor(rand() * 16), x = (i % 4) * 256, y = Math.floor(i / 4) * 128; return [x / 1024, 1 - (y + 128) / 1024, (x + 256) / 1024, 1 - y / 1024]; };
+  const vUV = () => { const i = Math.floor(rand() * 16); return [i * 64 / 1024, 0, (i + 1) * 64 / 1024, 0.5]; };
+  for (let k = 0; k < 3; k++) for (const [th, z, w, d, h] of landmarks.neonSigns[k]) {
+    const E = new THREE.Vector3(-Math.sin(th), Math.cos(th), 0), U = new THREE.Vector3(-Math.cos(th), -Math.sin(th), 0), N = new THREE.Vector3(0, 0, 1);
+    const P0 = cyl(R, th, z);
+    const faces = [[E, N, w / 2, d], [E.clone().negate(), N, w / 2, d], [N, E, d / 2, w], [N.clone().negate(), E, d / 2, w]];
+    const n = 1 + Math.floor(rand() * 3);
+    for (let q = 0; q < n; q++) {
+      const [out, along, half, len] = pick(faces), y = rr(4, Math.min(h - 3, 40)), a = rr(-0.3, 0.3) * len;
+      // 看板の「右」方向 = 上 × 表の向き（表から見て文字が正しく読める）
+      const right = n => new THREE.Vector3().crossVectors(U, n).normalize();
+      if (rand() < 0.5) {                                           // 縦長の袖看板（壁から突き出す）。両面に貼る
+        const hh = rr(4, 8), c = P0.clone().addScaledVector(out, half + 1.6).addScaledVector(U, y + hh).addScaledVector(along, a), uvv = vUV();
+        for (const sg of [1, -1]) { const nrm = along.clone().multiplyScalar(sg); quad(c.clone().addScaledVector(nrm, 0.05), right(nrm).multiplyScalar(1.1), U.clone().multiplyScalar(hh), ...uvv); }
+      } else {                                                      // 壁に貼った横長の看板
+        const hw = Math.min(len * 0.35, rr(4, 9)), c = P0.clone().addScaledVector(out, half + 0.3).addScaledVector(U, y).addScaledVector(along, a);
+        quad(c, right(out).multiplyScalar(hw), U.clone().multiplyScalar(hw / 2), ...hUV());
+      }
+    }
+    if (rand() < 0.35) {                                            // 屋上の看板
+      const [out, along, half, len] = pick(faces), hw = Math.min(len * 0.45, rr(6, 14));
+      const c = P0.clone().addScaledVector(out, half - 1).addScaledVector(U, h + hw / 2 + 1), uvr = hUV();
+      quad(c, new THREE.Vector3().crossVectors(U, out).normalize().multiplyScalar(hw), U.clone().multiplyScalar(hw / 2), ...uvr);
+      const back = out.clone().negate();                             // 裏側からも読めるように背中合わせにもう1枚
+      quad(c.clone().addScaledVector(back, 0.1), new THREE.Vector3().crossVectors(U, back).normalize().multiplyScalar(hw), U.clone().multiplyScalar(hw / 2), ...uvr);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx);
+  neonDistrictMat = new THREE.MeshBasicMaterial({ map: atlas, transparent: true, side: THREE.FrontSide, depthWrite: false, color: new THREE.Color(1, 1, 1) });
+  const m = new THREE.Mesh(g, neonDistrictMat); m.renderOrder = 2;
+  scene.add(m);
+}
 function updateResort(t) {
+  if (neonDistrictMat) neonDistrictMat.color.setScalar((0.9 + 3.6 * U.uNight.value) * (space.on ? 0.3 : 1) * (0.94 + 0.06 * Math.sin(t * 23)));
   if (lanternMat) { const n = U.uNight.value; lanternMat.color.setRGB(0.75 + 5 * n, 0.22 + 1.6 * n, 0.12 + 0.4 * n); stallMat.emissiveIntensity = 0.35 * n; }
   const r = LM.resort; if (!r) return;
   const u0 = (t * 0.018) % 1, m = new THREE.Matrix4(), q = new THREE.Quaternion();
@@ -2586,6 +2677,7 @@ const PRESETS = [
   ['超高層ビルの屋上', () => { const t = landmarks.tallest[0]; go(STRIP_PHI[0] + t.s / R, t.z + t.d / 2 - 1, t.h + 3, 0, -0.3); }],
   ['上空 1500m', () => go(STRIP_PHI[0], -2000, 1500, 0, -0.05)],
   ['中心軸のそば（無重力帯）', () => go(STRIP_PHI[0], -HL + 1200, R - 80, 0, 0)],
+  ['★ 歓楽街', () => { const n = landmarks.neonSpot || landmarks.cbd[0][0]; go(STRIP_PHI[0] + roadS(n.s) / R, n.z, EYE, 0, 0.2); }],
   ['★ 中心軸の駅（見上げる）', () => go(STRIP_PHI[0] + 0.25, HUB_Z - 700, 120, 0, 1.0)],
   ['★ 中心軸の駅（間近）', () => go(STRIP_PHI[0] + 0.62, HUB_Z - 750, R - 520, 0.35, 0.42)],
   ['★ 無重力パーク駅（電車が止まる）', () => go(STRIP_PHI[0] + 0.45, ZG_Z - 330, R - 130, 0.15, 0.25)],
