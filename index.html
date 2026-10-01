@@ -2320,6 +2320,7 @@ function updateSpaceCamera() {
   camera.position.copy(spaceFrame.localToWorld(p));
   camera.up.set(0, 0, 1);
   if (space.target) { const tg = spaceFrame.localToWorld(new THREE.Vector3(...space.target)); camera.lookAt(tg); } else camera.lookAt(0, 0, space.tz);
+  if (camRoll) camera.rotateZ(camRoll);
 }
 const setSpaceDOF = on => { if (post.dofQuad) post.dofQuad.material.uniforms.uFocusCap.value = on ? Math.max(space.dist, 1001) : 150; };
 function toggleSpace() { space.on = !space.on; space.target = null; if (space.on) Object.assign(space, { mode: 'overview', az: 0.6, tilt: 1.0, dist: 30000, tz: -2000 }); /* 太陽側の斜め上から（ミラーの鏡面が見える） */ setSpaceDOF(space.on); envTimer = 99; }
@@ -3233,7 +3234,9 @@ function updateCamera() {
   camera.up.copy(up);
   const dir = V.tmp.copy(f).multiplyScalar(Math.cos(player.pitch)).addScaledVector(up, Math.sin(player.pitch));
   camera.lookAt(dir.add(camera.position));
+  if (camRoll) camera.rotateZ(camRoll);                 // ガイドツアーのロール（円筒が回って見える）
 }
+let camRoll = 0;
 
 let shadowHalf = 0;
 function updateSun() {
@@ -3522,34 +3525,34 @@ function terminalShot() {
 // 1ショット = 開始位置 + 移動量（d）+ 字幕。space ショットは宇宙カメラの値を from→to で動かす
 const SHOTS = [
   { ch: 'プロローグ', t: 'L5宙域、スペースコロニー「ネオ・ミヤギ」', x: '地球と月の重力がつり合うラグランジュ点L5。直径6.4km、長さ16kmの円筒が、太陽に片側の端を向けて浮かんでいるのだ。オニール型「島3号」を手本に、2071年に建設が始まり、2089年に完成したのだ。', dur: 18,
-    space: { mode: 'overview', from: { az: 0.3, tilt: 1.05, dist: 34000, tz: -2000 }, to: { az: 1.2, tilt: 1.15, dist: 26000, tz: -1000 } }, night: 0 },
+    space: { mode: 'overview', from: { az: -0.3, tilt: 1.0, dist: 38000, tz: -2000, roll: -0.25 }, to: { az: 1.3, tilt: 1.2, dist: 25000, tz: -1000, roll: 0.1 } }, night: 0 },
   { ch: 'プロローグ', t: '110秒で1回転する大地', x: 'コロニーは約110秒に1回転しているのだ。内側の地面では、この回転の遠心力がちょうど地球と同じ1Gの重さを生むのだ。中に住む約300万人にとって、円筒の内側が「地面」なのだ。', dur: 15,
-    space: { mode: 'overview', from: { az: 1.2, tilt: 1.15, dist: 26000, tz: -1000 }, to: { az: 2.0, tilt: 1.4, dist: 22000, tz: 0 } } },
+    space: { mode: 'overview', from: { az: 1.3, tilt: 1.57, dist: 20000, tz: 0, roll: 0 }, to: { az: 2.6, tilt: 1.57, dist: 17000, tz: 0, roll: 0.9 } } },
   { ch: 'プロローグ', t: '6基の兄弟コロニー', x: 'L5宙域には同じ型のコロニーが6基並んでいるのだ。どれも軸を太陽に向けて回り続け、外側の3枚の巨大なミラーで太陽の光を窓から中へ送り込んでいるのだ。', dur: 15,
-    space: { mode: 'overview', from: { az: 0.15, tilt: 0.55, dist: 200000, tz: 0 }, to: { az: 0.35, tilt: 0.6, dist: 185000, tz: 0 }, target: [-80000, 0, 0] } },
+    space: { mode: 'overview', from: { az: -0.2, tilt: 0.5, dist: 210000, tz: 0, roll: -0.3 }, to: { az: 0.6, tilt: 0.75, dist: 175000, tz: 0, roll: 0.2 }, target: [-80000, 0, 0] } },
   { ch: 'プロローグ', t: '太陽と3枚のミラー', x: '太陽は円筒の片側の端の先にあるのだ。陸地3枚と窓3枚が交互に並び、窓の外のミラーが角度を変えて光を入れたり閉じたりすることで、中に昼と夜を作っているのだ。', dur: 15,
-    space: { mode: 'overview', from: { az: 0.4, tilt: 2.6, dist: 34000, tz: -4000 }, to: { az: 0.9, tilt: 2.5, dist: 30000, tz: -3000 } } },
+    space: { mode: 'overview', from: { az: -0.2, tilt: 2.75, dist: 36000, tz: -4000, roll: 0.3 }, to: { az: 1.2, tilt: 2.35, dist: 28000, tz: -3000, roll: -0.2 } } },
   { ch: '入港', t: '宇宙港へのアプローチ', x: '太陽と反対側の端に、宇宙船の入口があるのだ。宇宙へまっすぐ伸びる赤い誘導灯の列に沿って、ぼくたちの船もゆっくり近づいていくのだ。入口が近づくと、船は噴射を絞っていくのだ。', dur: 22, fadeOut: true, fadeColor: '#ffffff',
     space: { mode: 'entrance', from: { az: 0.5, tilt: 2.75, dist: 2600, tz: ENTRY_Z - 9000 }, to: { az: 0.2, tilt: 3.05, dist: 500, tz: ENTRY_Z + 150 } } },
   { ch: '入港', t: '無重力の中心軸へ', x: '入口を抜けると、そこは円筒の中心軸なのだ。軸の近くは回転の影響がほとんどなく、無重力なのだ。貨物船や旅客船、そして時速1000kmの高速電車が、両端の宇宙港のあいだを行き来しているのだ。', dur: 18, fadeIn: true, fadeColor: '#ffffff',
     from: preset('宇宙港の出口'), d: { z: 1600, yaw: -0.1, pitch: -0.05 } },
   { ch: '円筒の内側', t: '頭上にも街がある世界', x: '見上げると、反対側の陸地が空のかわりに広がっているのだ。遠くの街ほど空気に霞んで、地面が両側からせり上がっていく――ここが円筒の中だと実感できる眺めなのだ。', dur: 16,
-    from: () => go(STRIP_PHI[0], -HL + 1800, R - 700, 0, -0.25), d: { z: 1200, pitch: 0.15 } },
+    from: () => go(STRIP_PHI[0], -HL + 1800, R - 700, 0, -0.25), d: { z: 1500, pitch: 0.15 }, roll: 1.2 },   // 前進しながらゆっくり回る
   { ch: '観光地', t: '新造船所', x: 'このコロニーは、もともと月から運んだ鉱物で船を造る、無重力の造船所として始まったのだ。今も軸のそばの新造船所では、重さのない空間で大きな船を効率よく組み立てているのだ。まわりには駅や事務所、積み上がった資材やタンクがひしめき、できあがった船は軸ぞいを通って宇宙港から宇宙へ出ていくのだ。', dur: 15,
     from: () => aimCam(0.75 + 0.35, NEW_YARD_Z - 230, R - 330, new THREE.Vector3(Math.cos(0.75) * 140, Math.sin(0.75) * 140, NEW_YARD_Z)), d: { z: 120 } },  // かごの外から組み立て中の船をねらう
   { ch: '観光地', t: 'コロニー中央駅（旧造船所）', x: '中央駅は、昔は最初の造船所だったのだ。錆びた巨大クレーンや船台のリング、最初に造られた船の骨組みが今も残っているのだ。そのまわりに駅と店が増築を重ねて、蜂の巣のような姿になったのだ。', dur: 16,
-    from: () => go(STRIP_PHI[0] + 0.62, HUB_Z - 750, R - 520, 0.35, 0.42), d: { yaw: 0.25, z: 120 } },
+    from: () => {}, orbit: { k: 0, s: 0, z: HUB_Z, h: R - 40, r: 760, ch: R - 560, ch1: R - 470, a0: -1.0, a1: 0.6 } },   // 中央駅のまわりを回り込む
   { ch: '観光地', t: '無重力パーク', x: '中心軸を包む直径500mのガラスの球なのだ。木の生えた浮島や水の玉のあいだを、人々が泳ぐように漂って遊んでいるのだ。軸の高速電車もここで止まるのだ。', dur: 15,
     from: preset('★ 無重力パーク（中心軸）'), d: { z: 200, pitch: -0.1 } },
   { ch: '街区', t: '都心のオフィス街', x: '高層ビルが立ち並ぶ都心なのだ。線路が交わるターミナル駅のまわりや、昔から栄えた場所にビルが集まっているのだ。窓の奥では今日も誰かが働いているのだ。', dur: 14,
-    from: preset('都心の大通り'), d: { z: 140, h: 20 } },
+    from: preset('都心の大通り'), d: { z: 220, h: 160, pitch: 0.35 } },   // ビルの谷間から上昇
   { ch: '街区', t: 'ターミナル駅', x: '環状線と陸地中央の高架線が交わるターミナル駅の真上からは、軸の中央駅へまっすぐ上がるエレベーターが伸びているのだ。地面の鉄道と、軸の高速電車や宇宙船がここでつながるコロニーのハブなので、エレベーターに近いほど高いビルが集まっているのだ。', dur: 13,
-    from: terminalShot, d: { z: 160, h: -10 } },
+    from: terminalShot, d: { z: 120, h: -60, yaw: 0.35 }, roll: 0.15 },
   { ch: '街区', t: '歓楽街', x: '昼間は少し静かな歓楽街なのだ。ビルの壁には看板がびっしり、大型スクリーンには広告が流れているのだ。本番は夜――あとで戻ってくるのだ。', dur: 13,
     from: preset('★ 歓楽街'), d: { z: 120, h: -10 } },
   { ch: '街区', t: '商店街', x: '発展しなかった駅の前には、アーケードのかかった昔ながらの商店街が残っているのだ。色とりどりの小さな店が並び、いつも人でにぎわっているのだ。', dur: 12, from: () => { const p = landmarks.shopSta || landmarks.samples.shop; go(STRIP_PHI[p.k] + p.s / R, p.z - 54, 3.2, 0, 0.03); }, d: { z: 75 } },   // アーケードの屋根の下を歩く
   { ch: '街区', t: '拡張境界地区', x: 'コロニーの街は、宇宙港のある端から奥へ少しずつ広がってきたのだ。端の畑から、工業地帯、開拓期にできた旧市街、そして新市街へ――時代ごとの街並みが、帯のように順番に並んでいるのだ。', dur: 16,
-    from: () => go(STRIP_PHI[0] - 200 / R, ZONE.farmEnd - 500, 260, 0, -0.32), d: { z: 1500, pitch: 0.12 } },
+    from: () => go(STRIP_PHI[0] - 200 / R, ZONE.farmEnd - 500, 260, 0, -0.32), d: { z: 2000, pitch: 0.18, h: -60 }, roll: -0.25 },
   { ch: '街区', t: '旧市街', x: '開拓者たちが最初に住んだ旧市街は、今では古いアパートがすき間なくひしめく貧民街になっているのだ。路地の先には、新市街のきれいな高層ビルがそびえているのだ。市は再開発を進めようとしているけど、「再開発反対」の横断幕を掲げる住民の反対にあって、話し合いは今も続いているのだ。', dur: 15,
     from: () => { const i = 16, sx = 4 * P + 6.5; go(STRIP_PHI[0] + sx / R, oldEndAt(0, i) - 520, 7, 0, 0.2); }, d: { z: 220, pitch: 0.06 } },   // 旧市街の路地から、境目の向こうの新市街の高層ビルを見上げる
   { ch: '街区', t: '寺社と鎮守の森', x: 'コロニーの人々は、地球から神様もいっしょに連れてきたのだ。朱色の鳥居と鎮守の森が、住宅地の中に静かにたたずんでいるのだ。', dur: 11, from: () => { const t = landmarks.samples.temple, n = t.ns || { s: t.s + 110, z: t.z }, dx = n.s - t.s, dz = n.z - t.z, L = Math.hypot(dx, dz) || 1; lookAt(t.k, t.s - dx / L * 120, t.z - dz / L * 120, t.s + dx * 0.5, t.z + dz * 0.5, 38, 0.7); }, d: { h: -6 } },  // 寺社の向こうに歓楽街
@@ -3557,7 +3560,7 @@ const SHOTS = [
   { ch: '街区', t: '農業区画', x: '両端の蓋の近くには、畑とガラスの温室が広がっているのだ。最初の作物の枝豆もここで育ったのだ。300万人の食べ物の多くは、このコロニーの中で育てているのだ。', dur: 12, from: () => { const sp = landmarks.samples.farm; lookAt(sp.k, sp.s, sp.z - 80, sp.s, sp.z - 500, 55, 0.75); }, d: { z: -90, yaw: 0.12 } },   // 畑の中から蓋の方（一面の畑）を向く
   { ch: '観光地', t: '大きな公園', x: '街のところどころにある大きな公園なのだ。鳥が群れで旋回し、木々が風に揺れているのだ。空の代わりに見えるのは、反対側の街なのだ。', dur: 12, from: preset('大きな公園'), d: { z: 100, pitch: 0.1 } },
   { ch: '観光地', t: '窓の上を渡る橋', x: '陸地と陸地のあいだにある窓は、全面ガラスなのだ。その上を渡る橋からは、足元のガラス越しに宇宙が見えるのだ。', dur: 13, from: preset('橋の上'), d: { th: 0.04, pitch: -0.3 } },
-  { ch: '観光地', t: 'リング大観覧車と遊園地', x: '窓のすぐそばに立つ直径240mの大観覧車なのだ。駅を降りるとすぐ遊園地で、ジェットコースターやメリーゴーラウンドがにぎやかに動いているのだ。', dur: 14, from: preset('リング大観覧車'), d: { z: 120, yaw: 0.15 } },
+  { ch: '観光地', t: 'リング大観覧車と遊園地', x: '窓のすぐそばに立つ直径240mの大観覧車なのだ。駅を降りるとすぐ遊園地で、ジェットコースターやメリーゴーラウンドがにぎやかに動いているのだ。', dur: 14, from: () => {}, orbit: { k: 1, s: 1470, z: BRIDGE_Z[RESORT.bi] + 300, h: 150, r: 380, ch: 40, ch1: 90, a0: -0.9, a1: 0.3 } },   // 観覧車のまわりを回り込む
   { ch: '観光地', t: '蓋をのぼるエレベーター', x: '両端の蓋には、地面から中心の宇宙港へまっすぐ上がるエレベーターが並んでいるのだ。いっしょに上ってみると、街がどんどん遠ざかり、上に行くほど体が軽くなって、終点ではふわりと浮いてしまうのだ。', dur: 11,
     from: () => { const i = elevators.findIndex(e => Math.abs(e.th - STRIP_PHI[0]) < 1e-3 && e.z < 0); demo.elev = i; elevLaunch(i, elapsed, 22); go(STRIP_PHI[0] + 130 / R, elevators[i].z + 260, 30, Math.PI - 0.5, 0); },
     follow: () => {                                  // 上っていく電車の斜め後ろについていき、電車を画面の中心にとらえる
@@ -3565,17 +3568,17 @@ const SHOTS = [
       player.h = Math.max(20, h + 30); player.th = e.th + ds / (R - player.h); player.z = e.z + dz;
       player.yaw = Math.atan2(-ds - 8.5, -dz); player.pitch = Math.atan2(h + 28 - player.h, Math.hypot(ds, dz)); } },
   { ch: '夜', t: 'ミラーが閉じて、夜が来る', x: '夕方になると、外の3枚のミラーがゆっくり窓に閉じていくのだ。差し込む光が消えて、コロニーに夜が訪れるのだ。', dur: 16, night: 1,
-    from: preset('上空 1500m'), d: { z: 900, pitch: 0.2 } },
+    from: preset('上空 1500m'), d: { z: 1100, pitch: 0.25, yaw: 0.5 }, roll: 0.35 },
   { ch: '夜', t: '光の筒', x: '夜のコロニーを中心軸から眺めると、窓明かりと街灯と車の光の流れが、円筒の内側をぐるりと埋め尽くすのだ。ここでしか見られない、上下左右すべてが夜景の世界なのだ。', dur: 18,
-    from: () => go(STRIP_PHI[0], -HL + 2500, R - 120, 0, 0), d: { z: 2200, yaw: 0.3 } },
+    from: () => go(STRIP_PHI[0], -HL + 2500, R - 120, 0, 0), d: { z: 3000, yaw: 0.2 }, roll: 1.6 },   // 光の筒の中を回りながら進む
   { ch: '夜', t: '目を覚ます歓楽街', x: '昼間は静かだった歓楽街が、夜になると一気に目を覚ますのだ。ネオン看板と広告スクリーンが道路まで色とりどりに染めるのだ。', dur: 15, from: preset('★ 歓楽街'), d: { z: 160, h: -12 } },
   { ch: '夜', t: '提灯の灯る川辺の屋台通り', x: '陸地を流れる川の岸には遊歩道があり、夜になると屋台がずらりと並ぶのだ。提灯の下で、水面に揺れる光を眺めながら食べ歩きを楽しめるのだ。', dur: 15,
     from: () => go(STRIP_PHI[RIVERSIDE.k] + (sCenter(RIVER_I[RIVERSIDE.k]) + 51) / R, zCenter(RIVERSIDE.j0) - 40, 12, -0.12, 0.05), d: { z: 200 } },   // 歩く速さでゆっくり（通りを流しきらない）
-  { ch: '夜', t: '夜の中央駅', x: '夜の中央駅は、ネオンの塊から光るエレベーターが放射状に伸びる、まるで巨大な灯台なのだ。', dur: 14, from: () => go(STRIP_PHI[0] + 0.25, HUB_Z - 420, R - 650, 0, 1.15), d: { yaw: 0.35, h: 60 } },  // 巣のすぐ下から見上げる
+  { ch: '夜', t: '夜の中央駅', x: '夜の中央駅は、ネオンの塊から光るエレベーターが放射状に伸びる、まるで巨大な灯台なのだ。', dur: 14, from: () => go(STRIP_PHI[0] + 0.25, HUB_Z - 420, R - 650, 0, 1.15), d: { yaw: 0.6, h: 140 }, roll: -0.5 },  // 巣のすぐ下から見上げる
   { ch: '夜', t: '虹色の観覧車', x: '観覧車の外周とジェットコースターのレールに虹色の光が流れ、遊園地の夜はまだまだ終わらないのだ。', dur: 13, from: () => { const zw = BRIDGE_Z[RESORT.bi] + 300; lookAt(1, 1470 - 60, zw - 320, 1470, zw, 60, -0.35); }, d: { z: 70, h: 10 } },  // 観覧車の正面から見上げる
   { ch: '夜', t: 'ライトアップされた公園', x: '公園では、暖かな光が木々を足元から照らしているのだ。頭上には反対側の街の灯りが、星空のかわりに広がっているのだ。', dur: 13, from: preset('大きな公園'), d: { z: 100, pitch: 0.15 } },
   { ch: 'エピローグ', t: 'また朝が来る', x: 'やがてミラーが開き、コロニーにまた朝が来るのだ。宇宙に浮かぶ小さな故郷、ネオ・ミヤギへようこそ。――ガイドはずんだもんでした。', dur: 20, night: 0, fadeIn: true, fadeOut: true,
-    space: { mode: 'overview', from: { az: 1.6, tilt: 1.2, dist: 22000, tz: -1000 }, to: { az: 0.5, tilt: 1.05, dist: 34000, tz: -2000 } } },
+    space: { mode: 'overview', from: { az: 1.8, tilt: 1.3, dist: 20000, tz: -1000, roll: 0.2 }, to: { az: 0.3, tilt: 0.95, dist: 40000, tz: -2000, roll: -0.15 } } },
 ];
 const SNS_SHOTS = [
   { ch: 'L5 SPACE COLONY', t: 'ネオ・ミヤギ', x: '宇宙に浮かぶ\n長さ16kmの円筒の街', dur: 5, night: 0,
@@ -3725,8 +3728,14 @@ function updateDemo(dt) {
   const sh = SHOTLIST()[demo.i], u = ease(Math.min(demo.t / sh.dur, 1));
   if (sh.space) {
     for (const k of ['az', 'tilt', 'dist', 'tz']) space[k] = THREE.MathUtils.lerp(sh.space.from[k], sh.space.to[k], u);
+    camRoll = THREE.MathUtils.lerp(sh.space.from.roll || 0, sh.space.to.roll || 0, u);
   } else {
-    if (sh.follow) sh.follow();                    // 電車についていく場面（ここで return すると次の場面へ進めなくなる）
+    camRoll = (sh.roll || 0) * u;                   // 場面ごとのロール（ラジアン）
+    if (sh.orbit) {                                 // 目標のまわりを回り込む: { k, s, z, h(目標の高さ), r(半径), ch(カメラの高さ), a0, a1 }
+      const o = sh.orbit, a = o.a0 + (o.a1 - o.a0) * u, h = THREE.MathUtils.lerp(o.ch, o.ch1 ?? o.ch, u);
+      const cs = o.s + Math.sin(a) * o.r, cz = o.z - Math.cos(a) * o.r;
+      aimCam(STRIP_PHI[o.k] + cs / R, cz, h, new THREE.Vector3(...cyl(R - o.h, STRIP_PHI[o.k] + o.s / R, o.z).toArray()));
+    } else if (sh.follow) sh.follow();              // 電車についていく場面（ここで return すると次の場面へ進めなくなる）
     else {
       const d = sh.d || {}, s0 = demo.start;
       player.th = s0.th + (d.th || 0) * u; player.z = s0.z + (d.z || 0) * u; player.h = s0.h + (d.h || 0) * u;
@@ -3756,6 +3765,7 @@ function startDemo() {
 }
 function stopDemo() {
   if (!demo.on) return;
+  camRoll = 0;
   demo.on = false;
   setMusic(false);
   demoEl.cap.style.opacity = 0; demoEl.fade.style.opacity = 0; demoEl.bar.classList.add('hidden');
