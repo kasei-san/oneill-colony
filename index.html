@@ -3643,7 +3643,7 @@ const SNS_SHOTS = [
     from: () => aimCam(0.75 + 0.35, NEW_YARD_Z - 230, R - 330, new THREE.Vector3(Math.cos(0.75) * 140, Math.sin(0.75) * 140, NEW_YARD_Z)), d: { z: 100 } },
   { ch: '街区', t: 'ターミナル駅', x: '中央駅からのエレベーターが\n地上の鉄道とつながるのだ', dur: 4,
     from: terminalShot, d: { z: 100, h: -50, yaw: 0.3 }, roll: 0.15 },
-  { ch: '街区', t: '農業区画', x: '最初の作物は枝豆\nずんだ餅のふるさとなのだ', dur: 5, from: () => {}, d: {},
+  { ch: '街区', t: '農業区画', x: '蓋のそばの畑で\n300万人の食べ物を育てるのだ', dur: 5, from: () => {}, d: {},
     follow: () => {                                  // 畑の上を周方向に低空飛行（PC版の農業区画の短縮版）
       const u = Math.min(demo.t / SHOTLIST()[demo.i].dur, 1), th = STRIP_PHI[0] - 0.2 + 0.4 * u;
       Object.assign(player, { th, z: -HL + 750 + 60 * Math.sin(u * Math.PI), h: 55 + 15 * Math.sin(u * Math.PI * 2), yaw: Math.PI / 2 + 0.2 * Math.sin(u * Math.PI), pitch: 0.06 }); }, roll: 0.12 },
