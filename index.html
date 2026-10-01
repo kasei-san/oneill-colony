@@ -40,7 +40,9 @@
   #sns-top .t { font-size: 0.78em; font-weight: 800; letter-spacing: 0.04em; }
   #sns-bot .x { font-size: 0.50em; font-weight: 700; line-height: 1.5; padding: 0 0.5em; }
   #sns-top > *, #sns-bot > * { transition: opacity 0.5s; }
-  .sns #demo-cap, .sns #demo-bar, .sns .panel { display: none !important; }
+  .sns #demo-cap, .sns .panel, .rec #demo-bar { display: none !important; }
+  .sns #demo-bar { right: auto; left: 12px; bottom: 12px; }
+  .sns #demo-stop { display: none; }   /* 動作確認用: 縦長の枠の外（左下）に操作ボタン */
   .rec #sns-top > *, .rec #sns-bot > *, .rec #demo-fade { transition: none !important; }
   html.sns, html.sns body { background: #111; }
   #demo-fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; transition: opacity 0.8s; }
@@ -1283,7 +1285,7 @@ function build() {
         // 正反射の向き（反射光はコロニーの窓へ入るので外からはほぼ見えない）＋ 太陽に照らされた鏡面の明るいにじみ
         float lit = max(dot(normalize(vMN), vec3(0.0, 0.0, 1.0)), 0.0);
         outgoingLight += vec3(1.0, 0.95, 0.85) * (pow(g, 80.0) * 6.0 + pow(g, 3.0) * 0.9 * lit + lit * 0.35) * uMirrorSun;
-        outgoingLight += vec3(1.0, 0.96, 0.88) * uMirrorSpace * (lit * 5.0 + pow(g, 2.0) * 6.0 + pow(g, 30.0) * 20.0); // 宇宙からの全景では太陽光を照り返してビカビカ光る
+        outgoingLight += vec3(1.0, 0.96, 0.88) * uMirrorSpace * (lit * 1.6 + pow(g, 2.0) * 1.8 + pow(g, 30.0) * 6.0); // 宇宙からの全景では太陽光を照り返して光る（強すぎると白飛びする）
       }
       #include <opaque_fragment>`);
   };
@@ -3634,15 +3636,17 @@ const SNS_SHOTS = [
   { ch: '入港', t: '宇宙港へ', x: '赤い誘導灯に沿って\n中へ入るのだ', dur: 6, fadeOut: true, fadeColor: '#ffffff',
     space: { mode: 'entrance', from: { az: 0.5, tilt: 2.75, dist: 2200, tz: ENTRY_Z - 6000 }, to: { az: 0.2, tilt: 3.05, dist: 500, tz: ENTRY_Z + 150 } } },
   { ch: '円筒の内側', t: '空のかわりに街', x: '見上げると\n反対側の街が広がっているのだ', dur: 4, fadeIn: true, fadeColor: '#ffffff',
-    from: () => go(STRIP_PHI[0], -HL + 1800, R - 700, 0, -0.25), d: { z: 900, pitch: 0.12 } },
+    from: () => go(STRIP_PHI[0], -HL + 1800, R - 700, 0, -0.25), d: { z: 900, pitch: 0.12 }, roll: 0.5 },
   { ch: '観光名所', t: 'コロニー中央駅', x: '無重力の軸の真ん中に\nネオンの蜂の巣なのだ', dur: 5,
     from: () => go(STRIP_PHI[0] + 0.62, HUB_Z - 750, R - 520, 0.35, 0.42), d: { yaw: 0.25, z: 120 } },
+  { ch: '観光名所', t: '新造船所', x: '重さのない軸のそばで\n大きな船を組み立てるのだ', dur: 4,
+    from: () => aimCam(0.75 + 0.35, NEW_YARD_Z - 230, R - 330, new THREE.Vector3(Math.cos(0.75) * 140, Math.sin(0.75) * 140, NEW_YARD_Z)), d: { z: 100 } },
+  { ch: '観光名所', t: '無重力パーク', x: 'ガラスの球の中を\n泳ぐように漂うのだ', dur: 4,
+    from: preset('★ 無重力パーク（中心軸）'), d: { z: 160, pitch: -0.1 } },
   { ch: '昼のコロニー', t: '300万人の街', x: '円筒の内側を\nぐるりと街が囲むのだ', dur: 5,
     from: () => go(STRIP_PHI[0] + 0.12, 600, 700, 0, -0.32), d: { z: 600, pitch: 0.1 } },
-  { ch: '円筒の内側', t: 'ぐるりと一周', x: '軸から見ると\n上も下も左右も街なのだ', dur: 6,
-    from: () => go(STRIP_PHI[0], HUB_Z + 600, R - 500, 0, 0.12), d: { z: 1200 }, roll: Math.PI },   // 中央駅と無重力パークのあいだ、軸から500mで前を向き、円筒ごと半回転して見せる
   { ch: '夜が来る', t: 'ミラーが閉じる', x: '外のミラーが窓を覆うと\nコロニーに夜が来るのだ', dur: 8, night: 1,
-    from: () => go(STRIP_PHI[0], -1200, 1500, 0, -0.04), d: { z: 600, pitch: 0.08 } },
+    from: () => go(STRIP_PHI[0], -1200, 1500, 0, -0.04), d: { z: 600, pitch: 0.08 }, roll: 0.45 },
   { ch: '夜のコロニー', t: '光の筒', x: '上も下も左右も\nすべてが夜景なのだ', dur: 5,
     from: () => go(STRIP_PHI[0], -HL + 2500, R - 120, 0, 0), d: { z: 1600, yaw: 0.25 }, roll: 1.2 },
   { ch: '観光名所', t: '夜の中央駅', x: 'ネオンと光るエレベーターの\n巨大な灯台なのだ', dur: 5,
@@ -3748,7 +3752,8 @@ function demoStartShot(i) {
     const tp = el('sns-top'), bt = el('sns-bot');
     [tp, bt].forEach(e => [...e.children].forEach(c => c.style.opacity = 0));
     const put = () => { tp.querySelector('.ch').textContent = sh.ch; tp.querySelector('.t').textContent = sh.t; bt.querySelector('.x').innerHTML = sh.x.replace(/\n/g, '<br>'); [tp, bt].forEach(e => [...e.children].forEach(c => c.style.opacity = 1)); };
-    if (REC) put(); else setTimeout(put, 300);
+    const tk = demo.snsTok = (demo.snsTok || 0) + 1;   // 連打したとき、前の場面の文字が遅れて出ないように
+    if (REC) put(); else setTimeout(() => { if (tk === demo.snsTok) put(); }, 300);
   }
   demo.i = i; demo.t = 0;
   { const list = SHOTLIST(); let nt = 0; for (let k = 0; k <= i; k++) if (list[k].night !== undefined) nt = list[k].night;   // 場面までの昼夜の指定をたどる（飛ばしても合う）
