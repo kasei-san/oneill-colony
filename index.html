@@ -166,6 +166,7 @@ const U = {
   uEnv: { value: null },
   uTime: { value: 0 },
   uNight: { value: 0 },  // 0=昼, 1=夜
+  uSpace: { value: 0 },  // 1=宇宙から見ている（道路の光・ガラスの映り込みを抑える）
 };
 const sun = new THREE.DirectionalLight(0xfff2e0, 3.3);
 sun.castShadow = true;
@@ -180,7 +181,7 @@ function patch(mat, opts = {}) {
   const key = 'colony-' + (opts.building ? 'b' : '') + (opts.ground ? 'g' : '') + (opts.wind ? 'w' : '');
   mat.customProgramCacheKey = () => key;
   mat.onBeforeCompile = sh => {
-    sh.uniforms.uSunL = U.uSunL; sh.uniforms.uSkyAmb = U.uSkyAmb; sh.uniforms.uGndAmb = U.uGndAmb; sh.uniforms.uNight = U.uNight;
+    sh.uniforms.uSunL = U.uSunL; sh.uniforms.uSkyAmb = U.uSkyAmb; sh.uniforms.uGndAmb = U.uGndAmb; sh.uniforms.uNight = U.uNight; sh.uniforms.uSpace = U.uSpace;
     if (opts.ground) sh.uniforms.uDetail = U.uDetail;
     if (opts.wind) {
       sh.uniforms.uTime = U.uTime;
@@ -206,7 +207,7 @@ function patch(mat, opts = {}) {
           vVL = vec3(dot(vw, instanceMatrix[0].xyz) / vBS.x, dot(vw, instanceMatrix[1].xyz) / vBS.y, dot(vw, instanceMatrix[2].xyz) / vBS.z);
           vec3 q = fract(instanceMatrix[3].xyz * 0.1031); q += dot(q, q.zyx + 31.32); vBId = fract((q.x + q.y) * q.z); }` : ''}
       ${opts.ground ? 'vDuv = duv;' : ''}`);
-    let fs = `varying vec3 vCW; uniform vec3 uSunL[3]; uniform vec3 uSkyAmb; uniform vec3 uGndAmb; uniform float uNight;
+    let fs = `varying vec3 vCW; uniform vec3 uSunL[3]; uniform vec3 uSkyAmb; uniform vec3 uGndAmb; uniform float uNight; uniform float uSpace;
       ${opts.building ? `varying vec3 vBL; varying vec3 vBN; varying vec3 vBS; varying vec3 vVL; varying float vBId;
         float bHash(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
         float bNoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
@@ -237,7 +238,7 @@ function patch(mat, opts = {}) {
           float road = 1.0 - smoothstep(0.06, 0.075, min(fd.x, fd.y));
           float along = fd.x < fd.y ? vDuv.y : vDuv.x;
           float lamp = pow(0.5 + 0.5 * cos(along * 6.2832 * 4.4), 6.0); // 約25mおきの街灯の光だまり
-          totalEmissiveRadiance += uNight * road * (0.03 + 0.35 * lamp) * vec3(1.0, 0.72, 0.4);
+          totalEmissiveRadiance += uNight * road * (0.03 + 0.35 * lamp) * vec3(1.0, 0.72, 0.4) * mix(1.0, 0.2, uSpace);
         }`);
       fs = fs.replace('#include <map_fragment>', `#include <map_fragment>
         { vec4 dt = texture2D(uDetail, vDuv);
@@ -688,13 +689,13 @@ function build() {
   glassTex.wrapS = glassTex.wrapT = THREE.RepeatWrapping; glassTex.anisotropy = ANISO; glassTex.colorSpace = THREE.SRGBColorSpace;
   const glassMat = new THREE.MeshBasicMaterial({ map: glassTex, transparent: true, depthWrite: false, side: THREE.DoubleSide });
   glassMat.onBeforeCompile = sh => {
-    sh.uniforms.uEnv = U.uEnv;
+    sh.uniforms.uEnv = U.uEnv; sh.uniforms.uSpace = U.uSpace;
     sh.vertexShader = 'varying vec3 vGW; varying vec3 vGN;\n' + sh.vertexShader.replace('#include <project_vertex>',
       '#include <project_vertex>\n vGW = (modelMatrix * vec4(transformed, 1.0)).xyz; vGN = normalize(mat3(modelMatrix) * normal);');
-    sh.fragmentShader = 'varying vec3 vGW; varying vec3 vGN; uniform samplerCube uEnv;\n' + sh.fragmentShader.replace('#include <opaque_fragment>', `{
+    sh.fragmentShader = 'varying vec3 vGW; varying vec3 vGN; uniform samplerCube uEnv; uniform float uSpace;\n' + sh.fragmentShader.replace('#include <opaque_fragment>', `{
         vec3 V = normalize(vGW - cameraPosition), N = normalize(vGN);
         if (dot(N, V) > 0.0) N = -N;
-        float fr = clamp(0.06 + 0.94 * pow(1.0 - abs(dot(N, V)), 5.0), 0.0, 1.0);
+        float fr = clamp(0.06 + 0.94 * pow(1.0 - abs(dot(N, V)), 5.0), 0.0, 1.0) * (1.0 - uSpace); // 環境マップは内側から撮ったものなので外からは使わない
         outgoingLight = mix(outgoingLight, textureCube(uEnv, reflect(V, N)).rgb, fr);
         diffuseColor.a = max(diffuseColor.a, fr);
       }
@@ -823,7 +824,14 @@ function build() {
   for (let x = 0; x < 128; x += 32) mg.fillRect(x, 0, 2, 1024);
   mg.fillStyle = '#8a929e'; mg.fillRect(0, 0, 3, 1024); mg.fillRect(125, 0, 3, 1024);
   const mirrorTex = new THREE.CanvasTexture(mc); mirrorTex.colorSpace = THREE.SRGBColorSpace;
-  const mirrorMat = new THREE.MeshBasicMaterial({ map: mirrorTex, side: THREE.DoubleSide, fog: false, depthWrite: false });
+  const mirrorMat = new THREE.MeshBasicMaterial({ map: mirrorTex, side: THREE.BackSide, fog: false, depthWrite: false }); // 窓に向いた鏡面
+  // 鏡の裏（宇宙側）: 何も映さないくすんだ構造パネル
+  const [bc, bg] = canvas(128, 1024);
+  bg.fillStyle = '#3c4148'; bg.fillRect(0, 0, 128, 1024);
+  bg.fillStyle = '#2a2e34'; for (let y = 0; y < 1024; y += 32) bg.fillRect(0, y, 128, 3); for (let x = 0; x < 128; x += 32) bg.fillRect(x, 0, 3, 1024);
+  bg.fillStyle = '#555b63'; for (let y = 16; y < 1024; y += 128) bg.fillRect(0, y, 128, 8);
+  const backTex = new THREE.CanvasTexture(bc); backTex.colorSpace = THREE.SRGBColorSpace;
+  const mirrorBackMat = new THREE.MeshBasicMaterial({ map: backTex, side: THREE.FrontSide, fog: false });
   for (const psi of WIN_PHI) {
     const out = new THREE.Vector3(Math.cos(psi), Math.sin(psi), 0), east = new THREE.Vector3(-Math.sin(psi), Math.cos(psi), 0);
     const hw = (GLASS_R + 60) * Math.sin(SECTOR / 2) * 1.04;
@@ -833,6 +841,7 @@ function build() {
     geo.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2));
     geo.setIndex([0, 1, 2, 0, 2, 3]);
     const mesh = new THREE.Mesh(geo, mirrorMat); mesh.frustumCulled = false;
+    const back = new THREE.Mesh(geo, mirrorBackMat); back.frustumCulled = false; scene.add(back);
     scene.add(mesh);
     mirrors.push({ geo, out, east, hw, H });
   }
@@ -873,7 +882,7 @@ function build() {
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));
     g.setAttribute('aOn', new THREE.BufferAttribute(on, 1).setUsage(THREE.DynamicDrawUsage));
     const m = new THREE.ShaderMaterial({
-      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uNight: { value: 0 }, uSize: { value: 2.6 * renderer.getPixelRatio() } }]),
+      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uNight: { value: 0 }, uDim: { value: 1 }, uSize: { value: 2.6 * renderer.getPixelRatio() } }]),
       vertexShader: `
         #include <common>
         #include <fog_pars_vertex>
@@ -891,12 +900,12 @@ function build() {
         #include <common>
         #include <fog_pars_fragment>
         #include <logdepthbuf_pars_fragment>
-        uniform float uNight; varying vec3 vCol;
+        uniform float uNight; uniform float uDim; varying vec3 vCol;
         void main() {
           #include <logdepthbuf_fragment>
           float a = smoothstep(0.5, 0.1, length(gl_PointCoord - 0.5)) * uNight;
           if (a < 0.01) discard;
-          gl_FragColor = vec4(vCol * 3.0, a);
+          gl_FragColor = vec4(vCol * 3.0 * uDim, a);
           #include <fog_fragment>
         }`,
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: true,
@@ -1070,7 +1079,11 @@ function updateSpace(t) {
   spaceFrame.rotation.z = -OMEGA * t;
   if (hullBeacons) hullBeacons.material.opacity = (t % 1.5) < 0.15 ? 1 : 0.05;
   const pulse = 0.5 - 0.5 * Math.cos(t * TAU / 2.4);               // 2.4秒周期でゆっくり明滅
-  for (const p of guideRings) { p.material.opacity = 0.08 + 0.92 * pulse; p.material.size = 4 + 4 * pulse; }
+  // 近くで見るとき以外は暗め・小さめ（引きで見るとブルームで眩しすぎるため）
+  const gd = THREE.MathUtils.clamp(space.dist / 4000, 1, 6);
+  for (const p of guideRings) { p.material.opacity = 0.05 + 0.6 * pulse; p.material.size = (2.5 + 2.5 * pulse) / Math.sqrt(gd); p.material.color.setRGB(3 / gd, 0.15 / gd, 0.1 / gd); }
+  U.uSpace.value = space.on ? 1 : 0;
+  if (lampHeadMat) { const e = U.uNight.value, f = space.on ? 0.3 : 1; lampHeadMat.color.setRGB((0.6 + 7.4 * e) * f, (0.6 + 5.0 * e) * f, (0.6 + 2.6 * e) * f); }
   const zFar = ENTRY_Z - 16000;
   for (const s of extShips) {
     const T = s.period, u = ((t / T + s.ph) % 1) * T;
@@ -1808,7 +1821,7 @@ function updateVehicles(t) {
   const a = carMesh.instanceMatrix.array;
   const zSpan = L - 100, z0 = -HL + 50;
   const lightsOn = U.uNight.value > 0.01;
-  carLights.visible = lightsOn; carLights.material.uniforms.uNight.value = U.uNight.value;
+  carLights.visible = lightsOn; carLights.material.uniforms.uNight.value = U.uNight.value; carLights.material.uniforms.uDim.value = space.on ? 0.25 : 1;
   const lPos = carLights.geometry.attributes.position.array, lOn = carLights.geometry.attributes.aOn.array;
   vehicles.cars.forEach((c, q) => {
     const th = c.ring ? c.ph + c.v * t : c.lane, z = c.ring ? c.lane : z0 + (((c.ph + c.v * t) % zSpan) + zSpan) % zSpan;
