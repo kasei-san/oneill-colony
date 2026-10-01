@@ -968,6 +968,7 @@ function build() {
   scene.add(glare);
 
   buildShips();
+  buildRailStations();
   buildAxisTrains();
   buildLocalLife();
   buildBirds();
@@ -2548,7 +2549,81 @@ function renderFrame(dt) {
   renderer.setRenderTarget(null); post.final.render(renderer);
 }
 
+// ===== 地上の電車と駅: 電車は駅でランダムに（約半分の確率で）止まる =====
+// 位置 u は進行方向に測った距離（m）。環状線は 1 周 RING_SPAN、軸方向の線は AX_SPAN で折り返して先頭に戻る
+const RING_R = R - 16, RING_SPAN = TAU * RING_R, AX_SPAN = L - 400, AX_Z0 = -HL + 200;
+const TR_ACC = 0.9, TR_DWELL = 18, TR_HALF = 84;                        // 加減速 m/s²・停車秒・編成の半分の長さ
+const axZ = (tr, u) => { const w = ((u % AX_SPAN) + AX_SPAN) % AX_SPAN; return tr.dir > 0 ? AX_Z0 + w : AX_Z0 + AX_SPAN - w; };
+const STATIONS = { ring: [], axial: [] };                              // 環状線: 角度、軸方向: z
+for (let k = 0; k < 3; k++) for (const d of [-0.27, 0.27]) STATIONS.ring.push(STRIP_PHI[k] + d * SECTOR);
+for (let i = 0; i + 1 < BRIDGE_Z.length; i += 2) STATIONS.axial.push((BRIDGE_Z[i] + BRIDGE_Z[i + 1]) / 2);
+function initTrains() {
+  for (const tr of vehicles.trains) {
+    tr.dir = Math.sign(tr.v);
+    tr.cruise = tr.ring ? 30 : 28; tr.spd = tr.cruise; tr.wait = 0; tr.skip = -1;
+    tr.u = tr.ring ? tr.ph * RING_R : tr.ph;
+    tr.span = tr.ring ? RING_SPAN : AX_SPAN;
+    // 駅の位置を、進行方向の距離 u（編成の中央がホームに来る先頭位置）に直す
+    tr.stops = (tr.ring ? STATIONS.ring.map(a => normAng(tr.dir * a) * RING_R) : STATIONS.axial.map(z => tr.dir > 0 ? z - AX_Z0 : AX_Z0 + AX_SPAN - z)).map(x => x + TR_HALF);
+    tr.group = (tr.ring ? 'r' : 'a') + tr.lane.toFixed(4);
+  }
+}
+let trainsInit = false, trainLastT = 0;
+function stepTrains(t) {
+  if (!trainsInit) { initTrains(); trainsInit = true; trainLastT = t; }
+  const dt = Math.min(t - trainLastT, 0.1); trainLastT = t;
+  const groups = {};
+  for (const tr of vehicles.trains) (groups[tr.group] ??= []).push(tr);
+  for (const tr of vehicles.trains) {
+    const w = ((tr.u % tr.span) + tr.span) % tr.span;
+    if (tr.wait > 0) { tr.wait -= dt; tr.spd = 0; if (tr.wait <= 0) tr.u += 1; continue; }
+    // 次の駅までの距離。止まるかどうかは駅ごと・通過ごとにランダム
+    let dS = Infinity, idS = -1;
+    tr.stops.forEach((x, i) => { const d = ((x - w) % tr.span + tr.span) % tr.span; if (d < dS) { dS = d; idS = i; } });
+    const lap = Math.floor(tr.u / tr.span), key = lap * 100 + idS;
+    if (tr.decided !== key) { tr.decided = key; tr.stopHere = rand() < 0.55; }
+    // 前の電車との間隔
+    let gap = Infinity;
+    for (const o of groups[tr.group]) if (o !== tr) { const d = (((o.u - 8 * 21) - tr.u) % tr.span + tr.span) % tr.span; gap = Math.min(gap, d); }
+    let vMax = tr.cruise;
+    if (tr.stopHere) vMax = Math.min(vMax, Math.sqrt(2 * TR_ACC * Math.max(dS, 0)));
+    vMax = Math.min(vMax, Math.sqrt(2 * TR_ACC * Math.max(gap - 60, 0)));
+    tr.spd = tr.spd < vMax ? Math.min(vMax, tr.spd + TR_ACC * dt) : vMax;
+    const step = tr.spd * dt;
+    if (tr.stopHere && dS <= Math.max(step, 0.3)) { tr.u += dS; tr.spd = 0; tr.wait = TR_DWELL; tr.stopHere = false; continue; }
+    tr.u += step;
+  }
+}
+// 駅の建物: 高架の両側のホーム・屋根・柱・地上の駅舎
+function buildRailStations() {
+  const plat = [], roof = [], cols = [], light = [];
+  const hw = 90;                                                       // ホームの半分の長さ（m）
+  for (const a of STATIONS.ring) for (const zb of BRIDGE_Z) {
+    const da = hw / RING_R;
+    for (const sg of [-1, 1]) {
+      plat.push(a, zb + sg * 6.75, 15, hw * 2, 1, 4.5, 0xc8c4bc);
+      roof.push(a, zb + sg * 6.5, 22, hw * 2, 0.5, 6, 0x3f6fa8);
+      light.push(a, zb + sg * 8.9, 19.5, hw * 2, 0.25, 0.25);
+      for (let x = -hw; x <= hw; x += 30) cols.push(a + x / RING_R, zb + sg * 8.7, 0, 0.6, 22, 0.6, 0x9aa0a8);
+    }
+  }
+  for (let k = 0; k < 3; k++) for (const z of STATIONS.axial) {
+    const phi = STRIP_PHI[k];
+    for (const sg of [-1, 1]) {
+      plat.push(phi + sg * 6.3 / R, z, 7, 4.5, 1, hw * 2, 0xc8c4bc);
+      roof.push(phi + sg * 6 / R, z, 14, 6, 0.5, hw * 2, 0x3f6fa8);
+      light.push(phi + sg * 8.4 / R, z, 11.5, 0.25, 0.25, hw * 2);
+      for (let x = -hw; x <= hw; x += 30) cols.push(phi + sg * 8.2 / R, z + x, 0, 0.6, 14, 0.6, 0x9aa0a8);
+    }
+  }
+  const m = patch(new THREE.MeshStandardMaterial({ roughness: 0.6 }));
+  scene.add(instanced(GEO.box, m, plat, 7), instanced(GEO.box, m, roof, 7), instanced(GEO.box, m, cols, 7));
+  railStationLight = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.8, 0.85, 0.9) });
+  scene.add(instanced(GEO.box, railStationLight, light, 6, { color: false, cast: false }));
+}
+let railStationLight;
 function updateVehicles(t) {
+  if (railStationLight) { const n = U.uNight.value; railStationLight.color.setRGB(0.8 + 4 * n, 0.85 + 4 * n, 0.9 + 4 * n); }
   const a = carMesh.instanceMatrix.array;
   const zSpan = L - 100, z0 = -HL + 50;
   const lightsOn = U.uNight.value > 0.01;
@@ -2571,16 +2646,13 @@ function updateVehicles(t) {
   });
   carMesh.instanceMatrix.needsUpdate = true;
   if (lightsOn) { carLights.geometry.attributes.position.needsUpdate = carLights.geometry.attributes.aOn.needsUpdate = true; }
-  const b = trainMesh.instanceMatrix.array, tSpan = L - 400, tz0 = -HL + 200;
+  const b = trainMesh.instanceMatrix.array;
+  stepTrains(t);
   vehicles.trains.forEach((tr, q) => {
-    const dir = Math.sign(tr.v);
     for (let n = 0; n < 8; n++) {
-      const o = (q * 8 + n) * 16;
-      if (tr.ring) writeBox(b, o, tr.ph + tr.v * t - dir * n * 21 / (R - 16), tr.lane, 16, 20, 3.6, 3.0);
-      else {
-        const z = tz0 + ((((tr.ph + tr.v * t - dir * n * 21) % tSpan) + tSpan) % tSpan);
-        writeBox(b, o, tr.lane, z, 8, 3.0, 3.6, 20);
-      }
+      const o = (q * 8 + n) * 16, u = tr.u - n * 21;
+      if (tr.ring) writeBox(b, o, tr.dir * u / RING_R, tr.lane, 16, 20, 3.6, 3.0);
+      else writeBox(b, o, tr.lane, axZ(tr, u), 8, 3.0, 3.6, 20);
     }
   });
   trainMesh.instanceMatrix.needsUpdate = true;
@@ -2747,6 +2819,7 @@ const PRESETS = [
   ['超高層ビルの屋上', () => { const t = landmarks.tallest[0]; go(STRIP_PHI[0] + t.s / R, t.z + t.d / 2 - 1, t.h + 3, 0, -0.3); }],
   ['上空 1500m', () => go(STRIP_PHI[0], -2000, 1500, 0, -0.05)],
   ['中心軸のそば（無重力帯）', () => go(STRIP_PHI[0], -HL + 1200, R - 80, 0, 0)],
+  ['地上の電車の駅', () => go(STATIONS.ring[0] + 60 / RING_R, BRIDGE_Z[7] + 40, 26, Math.PI + 0.2, 0.05)],
   ['★ 歓楽街', () => { const n = landmarks.neonSpot || landmarks.cbd[0][0]; go(STRIP_PHI[0] + (Math.round(n.s / P) * P + 6.5) / R, n.z - 150, 30, 0, 0.32); }],
   ['★ 中心軸の駅（見上げる）', () => go(STRIP_PHI[0] + 0.25, HUB_Z - 700, 120, 0, 1.0)],
   ['★ 中心軸の駅（間近）', () => go(STRIP_PHI[0] + 0.62, HUB_Z - 750, R - 520, 0.35, 0.42)],
@@ -2849,7 +2922,7 @@ setTimeout(() => {
   drawMinimapBase();
   PRESETS[0][1]();
   el('loading').classList.add('hidden');
-  window.__ready = true; window.__player = player; window.__ships = ships; window.__night = toggleNight; window.__space = space; window.__toggleSpace = toggleSpace; window.__viewEntrance = viewEntrance; window.__extShips = extShips; window.__post = post; window.__t = () => elapsed; window.__scene = scene; window.__axis = () => axisCarMesh;
+  window.__ready = true; window.__player = player; window.__ships = ships; window.__trains = vehicles.trains; window.__night = toggleNight; window.__space = space; window.__toggleSpace = toggleSpace; window.__viewEntrance = viewEntrance; window.__extShips = extShips; window.__post = post; window.__t = () => elapsed; window.__scene = scene; window.__axis = () => axisCarMesh;
   frame();
 }, 30);
 </script>
