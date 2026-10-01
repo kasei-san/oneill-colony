@@ -773,7 +773,7 @@ function build() {
     cg.fillStyle = '#6f757e'; cg.fillRect(0, 0, 1024, 1024);
     for (let k = 0; k < 3; k++) {
       const a0 = STRIP_PHI[k] - SECTOR / 2, a1 = STRIP_PHI[k] + SECTOR / 2;
-      for (let r = R / capR, n = 0; r > 0.5; r -= 0.035, n++) wedge(a0, a1, r - 0.035, r, n % 2 ? '#6d8a52' : '#7d9a5d');
+      for (let r = R / capR, n = 0; r > 0.5; r -= 0.035, n++) wedge(a0, a1, r - 0.035, r, n % 2 ? '#4a4f56' : '#8a9099');
       wedge(WIN_PHI[k] - SECTOR / 2, WIN_PHI[k] + SECTOR / 2, 0.5, 1, '#122036');
       for (let n = 1; n < 6; n++) { const a = WIN_PHI[k] - SECTOR / 2 + SECTOR * n / 6; wedge(a - 0.004, a + 0.004, 0.5, 1, '#3a414c'); }
     }
