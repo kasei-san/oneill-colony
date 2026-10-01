@@ -73,7 +73,8 @@ const zCenter = j => (j - (NZ - 1) / 2) * P;
 const BRIDGE_Z = [];
 for (let j = 6; j < NZ - 1; j += 10) BRIDGE_Z.push(zCenter(j) + P / 2);
 const RIVER_I = [7, 20, 10];
-const RESORT = { k: 1, i0: NS - 6, j0: 35, j1: 42 };   // 観覧車と遊園地のエリア（第2陸地の東端）
+const RESORT = { k: 1, i0: NS - 6, j0: 35, j1: 42 };
+const RIVERSIDE = { k: 2, j0: 76, j1: 78 };                  // 屋台が並ぶ川沿い（川の両岸の3ブロック）   // 観覧車と遊園地のエリア（第2陸地の東端）
 
 function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const rand = mulberry32(20261001);
@@ -180,13 +181,19 @@ scene.add(sun, sun.target);
 
 // 標準マテリアルに「位置ごとの太陽方向」「円筒用の半球環境光」などを注入する
 function patch(mat, opts = {}) {
-  const key = 'colony-' + (opts.building ? 'b' : '') + (opts.ground ? 'g' : '') + (opts.wind ? 'w' : '') + (opts.vehicle ? 'v' : '');
+  const key = 'colony-' + (opts.building ? 'b' : '') + (opts.ground ? 'g' : '') + (opts.wind ? 'w' : '') + (opts.vehicle ? 'v' : '') + (opts.carGlow ? 'c' : '');
   mat.customProgramCacheKey = () => key;
   mat.onBeforeCompile = sh => {
     sh.uniforms.uSunL = U.uSunL; sh.uniforms.uSkyAmb = U.uSkyAmb; sh.uniforms.uGndAmb = U.uGndAmb; sh.uniforms.uNight = U.uNight; sh.uniforms.uSpace = U.uSpace;
     if (opts.ground) sh.uniforms.uDetail = U.uDetail;
+    if (opts.carGlow) {
+      sh.vertexShader = 'attribute vec3 aGlow; varying vec3 vGlow;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vGlow = aGlow;');
+      sh.fragmentShader = 'varying vec3 vGlow;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n totalEmissiveRadiance += vGlow * (0.3 + 5.0 * uNight);');
+    }
     if (opts.wind) {
       sh.uniforms.uTime = U.uTime; sh.uniforms.uParks = U.uParks;
+      // 幹はインスタンスの葉の色を掛けず、元の茶色のまま（ライトアップで緑の幹にならないように）
+      sh.vertexShader = 'attribute float aTrunk;\n' + sh.vertexShader.replace('#include <color_vertex>', '#include <color_vertex>\n #ifdef USE_COLOR\n vColor.rgb = mix(vColor.rgb, color.rgb, aTrunk);\n #endif');
       // 大きな公園の中の木は、夜に足元から暖色のスポットライトで照らす
       sh.fragmentShader = 'uniform vec4 uParks[6];\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         if (uNight > 0.01) {
@@ -421,7 +428,7 @@ const envRTs = [0, 1].map(() => new THREE.WebGLCubeRenderTarget(LOW ? 128 : 256,
 const cubeCam = new THREE.CubeCamera(1, 150000, envRTs[0]);
 M.train = patch(new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0.1 }), { building: true, vehicle: true }); // 電車（窓パターンを車体に固定）
 M.detail = patch(new THREE.MeshStandardMaterial({ roughness: 0.75 }));
-M.carShape = patch(new THREE.MeshStandardMaterial({ roughness: 0.25, metalness: 0.5, vertexColors: true }));
+M.carShape = patch(new THREE.MeshStandardMaterial({ roughness: 0.25, metalness: 0.5, vertexColors: true }), { carGlow: true });
 M.ship = patch(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0.15 }));
 const envMats = [M.bld, M.water, M.car, M.ship, M.carShape];
 M.bld.envMapIntensity = 0.9; M.water.envMapIntensity = 1.4; M.car.envMapIntensity = 1.0;
@@ -453,10 +460,11 @@ const GEO = {
   box: new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0),
   roof: new THREE.ConeGeometry(Math.SQRT1_2, 1, 4, 1).rotateY(Math.PI / 4).translate(0, 0.5, 0),
   tree: (() => {
+    const markTrunk = g => { const c = g.attributes.color, a = new Float32Array(c.count); for (let i = 0; i < c.count; i++) a[i] = c.getX(i) > c.getZ(i) * 1.5 ? 1 : 0; g.setAttribute('aTrunk', new THREE.BufferAttribute(a, 1)); return g; };
     const colorize = (g, c) => { const n = g.attributes.position.count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) a.set(c, i * 3); g.setAttribute('color', new THREE.BufferAttribute(a, 3)); return g; };
     const trunk = colorize(new THREE.CylinderGeometry(0.05, 0.07, 0.4, 5).translate(0, 0.2, 0).toNonIndexed(), [0.55, 0.42, 0.3]);
     const crown = colorize(new THREE.IcosahedronGeometry(0.42, 0).translate(0, 0.62, 0), [1, 1, 1]);
-    return mergeGeometries([trunk, crown]);
+    return markTrunk(mergeGeometries([trunk, crown]));
   })(),
 };
 
@@ -528,6 +536,7 @@ function genStrip(k) {
     const cb = cbdF(s, z), c = Math.abs(s) / (STRIP_W / 2);
     let type;
     if (RESORT.k === k && i >= RESORT.i0 && j >= RESORT.j0 && j <= RESORT.j1) type = 'resort';
+    else if (RIVERSIDE.k === k && Math.abs(i - river) === 1 && j >= RIVERSIDE.j0 && j <= RIVERSIDE.j1) type = 'riverside';
     else if (i === river) type = 'river';
     else if (i === 0 || i === NS - 1) type = 'park';
     else if (bigParks.some(p => i >= p.i0 && i <= p.i1 && j >= p.j0 && j <= p.j1)) type = 'park';
@@ -538,6 +547,7 @@ function genStrip(k) {
     else type = 'res';
     blockTypes[k][i * NZ + j] = type;
 
+    if (type === 'riverside') { rect('#b9ad97', s, z, BLK + 6, BLK + 6); for (let n = 0; n < 6; n++) addTree(ch, s - Math.sign(s - sCenter(river)) * 30, z + (n - 2.5) * 16, rr(7, 10)); continue; } // 屋台が並ぶ石畳の河岸
     if (type === 'resort') {                          // 駐車場（アスファルト）とレジャー施設の舗装・植え込み
       const lot = j === 36 && (i === NS - 4 || i === NS - 3);   // 駅前の2ブロックだけ駐車場
       rect(lot ? '#3f4247' : '#cbbfa8', s, z, BLK + 6, BLK + 6);
@@ -1281,6 +1291,7 @@ function buildLandmarks() {
     scene.add(root);
     envHide.push(root);                                  // 夜に電飾が窓ガラスへ歪んで映るので映り込みから外す
     buildResort(zb);
+    buildRiverside();
   }
 }
 // 観覧車まわりのレジャーエリア: 遊園地・駅・駐車場・ホテルや商業ビル（第2陸地の東端、局所座標 s=東, z=北）
@@ -1353,7 +1364,35 @@ function buildResort(zb) {
   place(drop, 1370, zb + 90);
   LM.resort = { coaster: { curve, cars }, horses, seat };
 }
+// 川沿いの屋台: 両岸に屋台を並べ、柱のあいだに提灯を吊るす（夜は提灯が灯る）
+let lanternMat, stallMat;
+function buildRiverside() {
+  const k = RIVERSIDE.k, sc = sCenter(RIVER_I[k]), z0 = zCenter(RIVERSIDE.j0) - P / 2 + 8, z1 = zCenter(RIVERSIDE.j1) + P / 2 - 8;
+  const th = s => STRIP_PHI[k] + s / R;
+  const body = [], canopy = [], poles = [], lanterns = [], tables = [];
+  const canopyCols = [0xc0392b, 0xf2f2f2, 0x2f5fa8, 0xd8a531, 0x2e7d5b, 0xe67e22];
+  for (const side of [-1, 1]) {
+    const sStall = sc + side * 69;
+    for (let z = z0; z < z1; z += rr(7, 10)) {
+      if (rand() < 0.12) continue;                                  // ところどころ通り抜け
+      body.push(th(sStall), z, 0, 3.2, 2.3, 4.2, pick([0x8b6b4a, 0xa07850, 0x6e5238, 0xc8b89a]));
+      canopy.push(th(sStall - side * 0.6), z, 2.3, 4.4, 0.25, 4.8, pick(canopyCols));
+      if (rand() < 0.5) tables.push(th(sStall + side * 5), z + rr(-1, 1), 0, 1.4, 0.75, 1.4, 0xd8cfc0);
+    }
+    for (let z = z0; z <= z1; z += 18) poles.push(th(sc + side * 74), z, 0, 0.25, 4.5, 0.25, 0x5a4a3a);
+    for (let z = z0; z < z1; z += 1.8) {
+      const u = ((z - z0) % 18) / 18;
+      lanterns.push(th(sc + side * 74), z, 4.2 - 0.7 * Math.sin(Math.PI * u), 0.55, 0.7, 0.55);
+    }
+  }
+  const wood = patch(new THREE.MeshStandardMaterial({ roughness: 0.8 }));
+  stallMat = patch(new THREE.MeshStandardMaterial({ roughness: 0.8, emissive: 0xffb070, emissiveIntensity: 0 })); // 夜は屋台の中の明かりでほんのり光る
+  scene.add(instanced(GEO.box, stallMat, body, 7), instanced(GEO.box, wood, canopy, 7), instanced(GEO.box, wood, poles, 7), instanced(GEO.box, wood, tables, 7));
+  lanternMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.75, 0.22, 0.12) });
+  scene.add(instanced(new THREE.SphereGeometry(0.5, 8, 6).translate(0, 0.5, 0), lanternMat, lanterns, 6, { color: false, cast: false }));
+}
 function updateResort(t) {
+  if (lanternMat) { const n = U.uNight.value; lanternMat.color.setRGB(0.75 + 5 * n, 0.22 + 1.6 * n, 0.12 + 0.4 * n); stallMat.emissiveIntensity = 0.35 * n; }
   const r = LM.resort; if (!r) return;
   const u0 = (t * 0.018) % 1, m = new THREE.Matrix4(), q = new THREE.Quaternion();
   for (let i = 0; i < 6; i++) {
@@ -1656,6 +1695,7 @@ const toggleNight = () => { dayNight.target = dayNight.target ? 0 : 1; dayNight.
 // 近くの車用の形（前方 +z、地面 y=0、メートル単位）。インスタンス色が車体色になる
 const vcol = (g, c) => { const n = g.attributes.position.count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) a.set(c, i * 3); g.setAttribute('color', new THREE.BufferAttribute(a, 3)); return g.index ? g.toNonIndexed() : g; };
 // 近景の木: 幹＋枝＋葉の塊7つ（上ほど明るく下ほど暗い）
+const markTrunkG = g => { const c = g.attributes.color, a = new Float32Array(c.count); for (let i = 0; i < c.count; i++) a[i] = c.getX(i) > c.getZ(i) * 1.5 ? 1 : 0; g.setAttribute('aTrunk', new THREE.BufferAttribute(a, 1)); return g; };
 GEO.treeBroad = (() => {
   const r = mulberry32(42), parts = [vcol(new THREE.CylinderGeometry(0.035, 0.06, 0.55, 6).translate(0, 0.275, 0), [0.5, 0.38, 0.27])];
   for (const sx of [-1, 1]) parts.push(vcol(new THREE.CylinderGeometry(0.015, 0.025, 0.28, 5).translate(0, 0.14, 0).rotateZ(sx * 0.7).translate(0, 0.4, 0), [0.5, 0.38, 0.27]));
@@ -1664,13 +1704,13 @@ GEO.treeBroad = (() => {
     const b = 0.72 + (y - 0.5) * 1.3;
     parts.push(vcol(new THREE.IcosahedronGeometry(sz, 0).rotateY(r() * 3).translate(Math.cos(a) * d, y, Math.sin(a) * d), [b, b, b]));
   }
-  return mergeGeometries(parts);
+  return markTrunkG(mergeGeometries(parts));
 })();
 GEO.treeConifer = (() => {
   const parts = [vcol(new THREE.CylinderGeometry(0.03, 0.05, 0.3, 6).translate(0, 0.15, 0), [0.45, 0.33, 0.24])];
   [[0.36, 0.42, 0.18, 0.62], [0.28, 0.36, 0.42, 0.78], [0.19, 0.3, 0.64, 0.95]].forEach(([rad, h, y, b]) =>
     parts.push(vcol(new THREE.ConeGeometry(rad, h, 8).translate(0, y + h / 2, 0), [b * 0.75, b * 0.9, b * 0.8])));
-  return mergeGeometries(parts);
+  return markTrunkG(mergeGeometries(parts));
 })();
 // バス（全長11m）とトラック（全長8.6m）
 GEO.bus = (() => {
@@ -1692,6 +1732,13 @@ GEO.truck = (() => {
   for (const x of [-0.8, 0.8]) { p.push(vcol(new THREE.BoxGeometry(0.35, 0.16, 0.06).translate(x, 1.0, 4.17), [3, 3, 2.6])); p.push(vcol(new THREE.BoxGeometry(0.3, 0.2, 0.06).translate(x, 0.9, -4.22), [3, 0.15, 0.1])); }
   return mergeGeometries(p);
 })();
+// ライトの部品（頂点色が1を超える部分）を、夜に光らせる発光色の属性 aGlow に写す
+function markGlow(g) {
+  const c = g.attributes.color, a = new Float32Array(c.count * 3);
+  for (let i = 0; i < c.count; i++) if (c.getX(i) > 1.5) a.set([c.getX(i) / 3, c.getY(i) / 3, c.getZ(i) / 3], i * 3);
+  g.setAttribute('aGlow', new THREE.BufferAttribute(a, 3));
+  return g;
+}
 GEO.car = (() => {
   const parts = [];
   const add = (g, c) => { const n = g.attributes.position.count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) a.set(c, i * 3); g.setAttribute('color', new THREE.BufferAttribute(a, 3)); parts.push(g); };
@@ -1704,8 +1751,9 @@ GEO.car = (() => {
   add(new THREE.BoxGeometry(1.36, 0.05, 1.6).translate(0, 1.6, -0.3), [1, 1, 1]);                // 屋根
   for (const x of [-0.82, 0.82]) for (const z of [-1.4, 1.4]) add(new THREE.BoxGeometry(0.3, 0.64, 0.64).translate(x, 0.32, z), [0.04, 0.04, 0.04]);
   for (const x of [-0.6, 0.6]) { add(new THREE.BoxGeometry(0.4, 0.14, 0.06).translate(x, 0.82, 2.2), [3, 3, 2.6]); add(new THREE.BoxGeometry(0.4, 0.14, 0.06).translate(x, 0.82, -2.2), [3, 0.15, 0.1]); }
-  return mergeGeometries(parts.map(g => g.index ? g.toNonIndexed() : g));
+  return markGlow(mergeGeometries(parts.map(g => g.index ? g.toNonIndexed() : g)));
 })();
+markGlow(GEO.bus); markGlow(GEO.truck);
 // 進行方向つきで置く（fwdEast: 周方向に走るか、dir: ±1）
 function writeCar(a, o, th, z, fwdEast, dir) {
   const c = Math.cos(th), s = Math.sin(th), r = R;
@@ -1778,12 +1826,11 @@ function typeAt(th, z) {
   if (i < 0 || i >= NS || j < 0 || j >= NZ) return null;
   return blockTypes[k][i * NZ + j];
 }
-const CAR_D = { down: 1, mid: 0.55, res: 0.2, park: 0.1, river: 0.08, resort: 0.35 };
-const PED_D = { down: 1, mid: 0.45, res: 0.12, park: 0.3, river: 0.05, resort: 1 };
+const CAR_D = { down: 1, mid: 0.55, res: 0.2, park: 0.1, river: 0.08, resort: 0.35, riverside: 0.15 };
+const PED_D = { down: 1, mid: 0.45, res: 0.12, park: 0.3, river: 0.05, resort: 1, riverside: 1 };
 const local = { cars: [], peds: [] };
 const LC = { n: LOW ? 250 : 600, r: 700 }, LP = { n: LOW ? 600 : 1600, r: 320 };
-let localCarMeshes, pedBodyMesh, pedSkinMesh, localCarLights;
-const CAR_LIGHT_POS = [[2.2, -2.2, 0.6, 0.82], [5.52, -5.52, 0.85, 0.85], [4.17, -4.22, 0.8, 1.0]]; // 車種ごとの [前, 後ろ, 左右, 高さ]
+let localCarMeshes, pedBodyMesh, pedSkinMesh;
 
 // ===== 鳥の群れ（カメラ周辺。群れの中心が旋回し、各個体は少しずつずれて飛ぶ） =====
 const flocks = [];
@@ -1929,45 +1976,7 @@ function buildLocalLife() {
   pedSkinMesh.instanceMatrix = pedBodyMesh.instanceMatrix;
   pedBodyMesh.frustumCulled = pedSkinMesh.frustumCulled = false;
   scene.add(...localCarMeshes, pedBodyMesh, pedSkinMesh);
-  {
-    const n = LC.n * 4, g = new THREE.BufferGeometry();
-    const pos = new Float32Array(n * 3), col = new Float32Array(n * 3), on = new Float32Array(n);
-    for (let i = 0; i < n; i += 4) { col.set([1, 0.92, 0.78, 1, 0.92, 0.78, 1, 0.08, 0.03, 1, 0.08, 0.03], i * 3); }
-    g.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
-    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    g.setAttribute('aOn', new THREE.BufferAttribute(on, 1).setUsage(THREE.DynamicDrawUsage));
-    localCarLights = new THREE.Points(g, new THREE.ShaderMaterial({
-      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uNight: { value: 0 }, uPx: { value: innerHeight * renderer.getPixelRatio() } }]),
-      vertexShader: `
-        #include <common>
-        #include <fog_pars_vertex>
-        #include <logdepthbuf_pars_vertex>
-        attribute vec3 color; attribute float aOn; uniform float uPx; varying vec3 vCol;
-        void main() {
-          vCol = color;
-          vec4 mvPosition = viewMatrix * vec4(position, 1.0);
-          gl_Position = projectionMatrix * mvPosition;
-          gl_PointSize = aOn * clamp(1.4 * uPx / -mvPosition.z, 2.0, 40.0);   // 実寸約1.4mの光のにじみ
-          #include <logdepthbuf_vertex>
-          #include <fog_vertex>
-        }`,
-      fragmentShader: `
-        #include <common>
-        #include <fog_pars_fragment>
-        #include <logdepthbuf_pars_fragment>
-        uniform float uNight; varying vec3 vCol;
-        void main() {
-          #include <logdepthbuf_fragment>
-          float a = smoothstep(0.5, 0.0, length(gl_PointCoord - 0.5)) * uNight;
-          if (a < 0.01) discard;
-          gl_FragColor = vec4(vCol * 3.0, a);
-          #include <fog_fragment>
-        }`,
-      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: true,
-    }));
-    localCarLights.frustumCulled = false; localCarLights.renderOrder = 3;
-    scene.add(localCarLights);
-  }
+
 }
 // カメラ周辺のランダムな地点を、街区の密度に比例した確率で採用する
 function sampleNear(radius, dens) {
@@ -1990,7 +1999,7 @@ function spawnPed(q) {
   const p = sampleNear(LP.r, PED_D); if (!p) return;
   const dir = rand() < 0.5 ? 1 : -1, side = rand() < 0.5 ? 1 : -1;
   q.ring = rand() < 0.5; q.k = p.k; q.v = rr(1.0, 1.6) * dir;
-  if (p.t === 'park' || p.t === 'resort') { q.s = p.s; q.z = p.z; }                       // 公園は自由に歩く
+  if (p.t === 'park' || p.t === 'resort' || p.t === 'riverside') { q.s = p.s; q.z = p.z; }                       // 公園は自由に歩く
   else if (q.ring) { q.z = edgeZ(p.z) + side * 6.5; q.s = p.s; }      // 歩道
   else { q.s = Math.round(p.s / P) * P + side * 6.5; q.z = p.z; }
   q.on = true;
@@ -2000,27 +2009,15 @@ function far(o, r) {
   return Math.hypot(angDiff(th, player.th) * R, o.z - player.z) > r || Math.abs(o.s) > STRIP_W / 2 - 10 || Math.abs(o.z) > HL - 60;
 }
 function updateLocalLife(dt, t) {
-  const night = U.uNight.value, lightsOn = night > 0.01;
-  const lp = localCarLights.geometry.attributes.position.array, lo = localCarLights.geometry.attributes.aOn.array;
-  localCarLights.visible = lightsOn; localCarLights.material.uniforms.uNight.value = night;
-  local.cars.forEach((c, ci) => {
+  local.cars.forEach(c => {
     const a = localCarMeshes[c.t].instanceMatrix.array, i = c.idx;
-    const off = () => { for (let k = 0; k < 4; k++) lo[ci * 4 + k] = 0; };
+    const off = () => {};
     if (!c.on) { spawnCar(c); if (!c.on) { writeBox(a, i * 16, 0, 0, 0, 0, 0, 0); off(); return; } }
     if (c.ring) c.s += c.v * dt; else c.z += c.v * dt;
     if (far(c, LC.r * 1.15)) { c.on = false; writeBox(a, i * 16, 0, 0, 0, 0, 0, 0); off(); return; }
     const th = STRIP_PHI[c.k] + c.s / R, dir = Math.sign(c.v);
     writeCar(a, i * 16, th, c.z, c.ring, dir);
-    if (!lightsOn) return;
-    const [fw, bk, lat, hgt] = CAR_LIGHT_POS[c.t], r = R - hgt;
-    [[fw, -lat], [fw, lat], [bk, -lat], [bk, lat]].forEach(([f, l], k) => {
-      const along = f * dir, side = l;
-      const tt = c.ring ? th + along / r : th + side / r, zz = c.ring ? c.z + side : c.z + along;
-      lp.set([r * Math.cos(tt), r * Math.sin(tt), zz], (ci * 4 + k) * 3);
-      lo[ci * 4 + k] = 1;
-    });
   });
-  if (lightsOn) localCarLights.geometry.attributes.position.needsUpdate = localCarLights.geometry.attributes.aOn.needsUpdate = true;
   for (const m of localCarMeshes) m.instanceMatrix.needsUpdate = true;
   const b = pedBodyMesh.instanceMatrix.array;
   local.peds.forEach((q, i) => {
