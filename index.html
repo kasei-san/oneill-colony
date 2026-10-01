@@ -1419,7 +1419,54 @@ function buildRiverside() {
   scene.add(instanced(new THREE.SphereGeometry(0.5, 8, 6).translate(0, 0.5, 0), lanternMat, lanterns, 6, { color: false, cast: false }));
 }
 // 歓楽街のネオン看板: 横長の文字看板（壁・屋上）と縦長の袖看板（壁から突き出す）を1枚の画像にまとめて貼る
-let neonDistrictMat;
+let neonDistrictMat, adMat;
+// タイムズスクエア風の大型広告スクリーン: 歓楽街の高いビルの壁に掛け、7秒ごとに別の広告へ切り替わる
+function buildAdScreens() {
+  const [ac, g] = canvas(1024, 512);
+  const ads = [['COLONY COLA', '#e8102a', '#ffcf3a'], ['ZERO-G AIRLINES', '#0a3a8a', '#4ad0ff'], ['NEO TOKYO', '#2a0a4a', '#ff4fd8'], ['ずんだシェイク', '#3a8a2a', '#e8ffb0'],
+    ['SPACE NOODLE', '#ff7a1a', '#fff2c0'], ['L5 BANK', '#0a2a3a', '#3affc8'], ['ORBIT FM', '#4a0a2a', '#ffd23a'], ['スシロボ', '#c0102a', '#ffffff'],
+    ['MIRROR TV', '#101820', '#7ff9ff'], ['HOTEL LUNA', '#1a1040', '#c8b0ff'], ['GRAVITY GYM', '#ff2a6a', '#202020'], ['宇宙港 SALE', '#ffd200', '#e8102a'],
+    ['NEW MODEL', '#e8e8f0', '#202838'], ['LIVE 2096', '#3a0a6a', '#ff7ae0'], ['ANIME FES', '#ff6ad5', '#ffffff'], ['ネオ牛丼', '#ff8a00', '#5a1a00']];
+  ads.forEach(([t, bg, fg], i) => {
+    const x = (i % 4) * 256, y = Math.floor(i / 4) * 128;
+    const gr = g.createLinearGradient(x, y, x + 256, y + 128); gr.addColorStop(0, bg); gr.addColorStop(1, fg); g.fillStyle = gr; g.fillRect(x, y, 256, 128);
+    g.fillStyle = bg; g.globalAlpha = 0.55;
+    for (let n = 0; n < 3; n++) { g.beginPath(); g.arc(x + 40 + rand() * 180, y + 20 + rand() * 90, 12 + rand() * 40, 0, TAU); g.fill(); }
+    g.globalAlpha = 1;
+    g.font = `900 ${t.length > 9 ? 26 : 36}px "Hiragino Sans", sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.lineWidth = 5; g.strokeStyle = bg; g.strokeText(t, x + 128, y + 60); g.fillStyle = '#ffffff'; g.fillText(t, x + 128, y + 60);
+    g.font = 'bold 13px sans-serif'; g.fillStyle = fg; g.fillText(['NOW ON SALE', 'COMING SOON', '24H OPEN', 'ONLY IN L5', '新登場', '期間限定'][i % 6], x + 128, y + 98);
+    g.strokeStyle = '#ffffff'; g.lineWidth = 3; g.strokeRect(x + 2, y + 2, 252, 124);
+  });
+  const tex = new THREE.CanvasTexture(ac); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = ANISO;
+  const pos = [], uv = [], ad = [], idx = [];
+  for (let k = 0; k < 3; k++) for (const [th, z, w, d, h] of landmarks.neonSigns[k]) {
+    if (h < 35 || rand() > 0.5) continue;
+    const E = new THREE.Vector3(-Math.sin(th), Math.cos(th), 0), U = new THREE.Vector3(-Math.cos(th), -Math.sin(th), 0), N = new THREE.Vector3(0, 0, 1);
+    const faces = [[E, w / 2, d], [E.clone().negate(), w / 2, d], [N, d / 2, w], [N.clone().negate(), d / 2, w]];
+    const nScreens = rand() < 0.3 ? 2 : 1;
+    for (let q = 0; q < nScreens; q++) {
+      const [out, half, len] = pick(faces), hw = Math.min(len * 0.47, rr(12, 24)), hh = hw / 2, y = rr(hh + 8, Math.max(hh + 9, Math.min(h - hh - 3, 70)));
+      const c = cyl(R, th, z).addScaledVector(out, half + 0.6).addScaledVector(U, y), right = new THREE.Vector3().crossVectors(U, out).normalize();
+      const b = pos.length / 3, id = Math.floor(rand() * 16), ph = rand() * 16;
+      for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+        pos.push(c.x + right.x * hw * sx + U.x * hh * sy, c.y + right.y * hw * sx + U.y * hh * sy, c.z + right.z * hw * sx + U.z * hh * sy);
+        uv.push((sx + 1) / 2, (sy + 1) / 2); ad.push(id, ph);
+      }
+      idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); geo.setAttribute('aAd', new THREE.Float32BufferAttribute(ad, 2)); geo.setIndex(idx);
+  adMat = new THREE.MeshBasicMaterial({ map: tex, color: new THREE.Color(1, 1, 1) });
+  adMat.onBeforeCompile = sh => {
+    sh.uniforms.uTime = U.uTime;
+    sh.vertexShader = 'attribute vec2 aAd; uniform float uTime;\n' + sh.vertexShader.replace('#include <uv_vertex>', `#include <uv_vertex>
+      { float cell = mod(aAd.x + floor(uTime / 7.0 + aAd.y), 16.0), col = mod(cell, 4.0), row = floor(cell / 4.0);
+        vMapUv = vec2((col + uv.x) / 4.0, 1.0 - (row + 1.0 - uv.y) / 4.0); }`);
+  };
+  scene.add(new THREE.Mesh(geo, adMat));
+}
 function buildNeonSigns() {
   const [ac, ag] = canvas(1024, 1024);
   const cols = ['#ff4fd8', '#7ff9ff', '#ffcc33', '#ff5a3c', '#b6ff4a', '#4ab0ff', '#ff7ae0', '#4dff9c'];
@@ -1437,9 +1484,16 @@ function buildNeonSigns() {
   });
   vt.forEach((t, i) => {                                           // 下半分: 縦長 64x512 を 16本
     const x = i * 64, y = 512, c = cols[(i + 3) % cols.length];
-    ag.fillStyle = 'rgba(10,6,20,0.9)'; ag.fillRect(x + 4, y + 8, 56, 496);
-    ag.strokeStyle = c; ag.lineWidth = 3; ag.shadowColor = c; ag.shadowBlur = 10; ag.strokeRect(x + 8, y + 12, 48, 488); ag.shadowBlur = 0;
-    [...t].forEach((ch, n) => glowText(ch, x + 32, y + 60 + n * (400 / Math.max(3, t.length)), 40, c));
+    ag.fillStyle = 'rgba(10,6,20,0.9)'; ag.fillRect(x + 4, y + 8, 56, 432);
+    ag.strokeStyle = c; ag.lineWidth = 3; ag.shadowColor = c; ag.shadowBlur = 10; ag.strokeRect(x + 8, y + 12, 48, 424); ag.shadowBlur = 0;
+    [...t].forEach((ch, n) => glowText(ch, x + 32, y + 56 + n * (350 / Math.max(3, t.length)), 38, c));
+  });
+  const plainCols = ['#ff2fd0', '#2ff6ff', '#ffd23a', '#ff4a2a', '#9dff3a', '#3a8cff', '#ff6ad5', '#3affa0', '#ffffff', '#ff9a2a', '#c04aff', '#ff3a6a', '#4affea', '#f0ff4a', '#ff7ad8', '#7aa8ff'];
+  plainCols.forEach((c, i) => {                                    // 最下段: 文字なしの光るパネル 64x64 を16色
+    const x = i * 64, y = 960, gr = ag.createLinearGradient(x, y, x, y + 64);
+    gr.addColorStop(0, c); gr.addColorStop(0.5, c); gr.addColorStop(1, c);
+    ag.fillStyle = gr; ag.globalAlpha = 0.45; ag.fillRect(x + 3, y + 3, 58, 58); ag.globalAlpha = 1;
+    ag.strokeStyle = c; ag.lineWidth = 4; ag.strokeRect(x + 4, y + 4, 56, 56);
   });
   const atlas = new THREE.CanvasTexture(ac); atlas.colorSpace = THREE.SRGBColorSpace; atlas.anisotropy = ANISO;
   const pos = [], uv = [], idx = [];
@@ -1449,32 +1503,44 @@ function buildNeonSigns() {
     uv.push(u0, v0, u1, v0, u1, v1, u0, v1); idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
   };
   const hUV = () => { const i = Math.floor(rand() * 16), x = (i % 4) * 256, y = Math.floor(i / 4) * 128; return [x / 1024, 1 - (y + 128) / 1024, (x + 256) / 1024, 1 - y / 1024]; };
-  const vUV = () => { const i = Math.floor(rand() * 16); return [i * 64 / 1024, 0, (i + 1) * 64 / 1024, 0.5]; };
+  const vUV = () => { const i = Math.floor(rand() * 16); return [i * 64 / 1024, 64 / 1024, (i + 1) * 64 / 1024, 0.5]; };
+  const pUV = () => { const i = Math.floor(rand() * 16); return [(i * 64 + 6) / 1024, 6 / 1024, (i * 64 + 58) / 1024, 58 / 1024]; };
   for (let k = 0; k < 3; k++) for (const [th, z, w, d, h] of landmarks.neonSigns[k]) {
     const E = new THREE.Vector3(-Math.sin(th), Math.cos(th), 0), U = new THREE.Vector3(-Math.cos(th), -Math.sin(th), 0), N = new THREE.Vector3(0, 0, 1);
     const P0 = cyl(R, th, z);
     const faces = [[E, N, w / 2, d], [E.clone().negate(), N, w / 2, d], [N, E, d / 2, w], [N.clone().negate(), E, d / 2, w]];
-    const n = 1 + Math.floor(rand() * 3);
+    const right = n => new THREE.Vector3().crossVectors(U, n).normalize();
+    const n = 3 + Math.floor(rand() * 4);                            // 歌舞伎町くらいの密度
     for (let q = 0; q < n; q++) {
-      const [out, along, half, len] = pick(faces), y = rr(4, Math.min(h - 3, 40)), a = rr(-0.3, 0.3) * len;
-      // 看板の「右」方向 = 上 × 表の向き（表から見て文字が正しく読める）
-      const right = n => new THREE.Vector3().crossVectors(U, n).normalize();
-      if (rand() < 0.5) {                                           // 縦長の袖看板（壁から突き出す）。両面に貼る
-        const hh = rr(4, 8), c = P0.clone().addScaledVector(out, half + 1.6).addScaledVector(U, y + hh).addScaledVector(along, a), uvv = vUV();
-        for (const sg of [1, -1]) { const nrm = along.clone().multiplyScalar(sg); quad(c.clone().addScaledVector(nrm, 0.05), right(nrm).multiplyScalar(1.1), U.clone().multiplyScalar(hh), ...uvv); }
-      } else {                                                      // 壁に貼った横長の看板
-        const hw = Math.min(len * 0.35, rr(4, 9)), c = P0.clone().addScaledVector(out, half + 0.3).addScaledVector(U, y).addScaledVector(along, a);
+      const [out, along, half, len] = pick(faces), a = rr(-0.42, 0.42) * len, kind = rand();
+      if (kind < 0.35) {                                            // 縦長の袖看板を角に何段も重ねる
+        const stack = 1 + Math.floor(rand() * 4), uvx = (rr(0.3, 0.48) * (rand() < 0.5 ? -1 : 1)) * len;
+        for (let st = 0; st < stack; st++) {
+          const hh = rr(4, 7), y = 4 + st * 15 + rr(0, 3);
+          if (y + 2 * hh > h) break;
+          const c = P0.clone().addScaledVector(out, half + 1.8).addScaledVector(U, y + hh).addScaledVector(along, uvx), uvv = vUV();
+          for (const sg of [1, -1]) { const nrm = along.clone().multiplyScalar(sg); quad(c.clone().addScaledVector(nrm, 0.05), right(nrm).multiplyScalar(1.3), U.clone().multiplyScalar(hh), ...uvv); }
+        }
+      } else if (kind < 0.65) {                                     // 壁に貼った横長の文字看板
+        const hw = Math.min(len * 0.42, rr(5, 12)), y = rr(4, Math.min(h - 3, 45)), c = P0.clone().addScaledVector(out, half + 0.3).addScaledVector(U, y).addScaledVector(along, a);
         quad(c, right(out).multiplyScalar(hw), U.clone().multiplyScalar(hw / 2), ...hUV());
+      } else if (kind < 0.85) {                                     // 文字なしの光るパネル（大きな面）
+        const hw = Math.min(len * 0.3, rr(2, 6)), hh = rr(1, 3.5), y = rr(hh + 2, Math.min(h - hh, 50)), c = P0.clone().addScaledVector(out, half + 0.25).addScaledVector(U, y).addScaledVector(along, a);
+        quad(c, right(out).multiplyScalar(hw), U.clone().multiplyScalar(hh), ...pUV());
+      } else {                                                      // 階をなぞる細いネオン管
+        const y = rr(4, Math.min(h - 1, 40)), c = P0.clone().addScaledVector(out, half + 0.2).addScaledVector(U, y);
+        quad(c, right(out).multiplyScalar(len / 2), U.clone().multiplyScalar(0.35), ...pUV());
       }
     }
-    if (rand() < 0.35) {                                            // 屋上の看板
-      const [out, along, half, len] = pick(faces), hw = Math.min(len * 0.45, rr(6, 14));
+    if (rand() < 0.6) {                                             // 屋上の看板
+      const [out, along, half, len] = pick(faces), hw = Math.min(len * 0.48, rr(8, 18));
       const c = P0.clone().addScaledVector(out, half - 1).addScaledVector(U, h + hw / 2 + 1), uvr = hUV();
       quad(c, new THREE.Vector3().crossVectors(U, out).normalize().multiplyScalar(hw), U.clone().multiplyScalar(hw / 2), ...uvr);
       const back = out.clone().negate();                             // 裏側からも読めるように背中合わせにもう1枚
       quad(c.clone().addScaledVector(back, 0.1), new THREE.Vector3().crossVectors(U, back).normalize().multiplyScalar(hw), U.clone().multiplyScalar(hw / 2), ...uvr);
     }
   }
+  buildAdScreens();
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx);
   neonDistrictMat = new THREE.MeshBasicMaterial({ map: atlas, transparent: true, side: THREE.FrontSide, depthWrite: false, color: new THREE.Color(1, 1, 1) });
@@ -1482,7 +1548,8 @@ function buildNeonSigns() {
   scene.add(m);
 }
 function updateResort(t) {
-  if (neonDistrictMat) neonDistrictMat.color.setScalar((0.9 + 3.6 * U.uNight.value) * (space.on ? 0.3 : 1) * (0.94 + 0.06 * Math.sin(t * 23)));
+  if (adMat) adMat.color.setScalar((1.0 + 0.9 * U.uNight.value) * (space.on ? 0.3 : 1));
+  if (neonDistrictMat) neonDistrictMat.color.setScalar((1.0 + 4.5 * U.uNight.value) * (space.on ? 0.3 : 1) * (0.94 + 0.06 * Math.sin(t * 23)));
   if (lanternMat) { const n = U.uNight.value; lanternMat.color.setRGB(0.75 + 5 * n, 0.22 + 1.6 * n, 0.12 + 0.4 * n); stallMat.emissiveIntensity = 0.35 * n; }
   const r = LM.resort; if (!r) return;
   const u0 = (t * 0.018) % 1, m = new THREE.Matrix4(), q = new THREE.Quaternion();
@@ -2677,7 +2744,7 @@ const PRESETS = [
   ['超高層ビルの屋上', () => { const t = landmarks.tallest[0]; go(STRIP_PHI[0] + t.s / R, t.z + t.d / 2 - 1, t.h + 3, 0, -0.3); }],
   ['上空 1500m', () => go(STRIP_PHI[0], -2000, 1500, 0, -0.05)],
   ['中心軸のそば（無重力帯）', () => go(STRIP_PHI[0], -HL + 1200, R - 80, 0, 0)],
-  ['★ 歓楽街', () => { const n = landmarks.neonSpot || landmarks.cbd[0][0]; go(STRIP_PHI[0] + roadS(n.s) / R, n.z, EYE, 0, 0.2); }],
+  ['★ 歓楽街', () => { const n = landmarks.neonSpot || landmarks.cbd[0][0]; go(STRIP_PHI[0] + (Math.round(n.s / P) * P + 6.5) / R, n.z - 150, 30, 0, 0.32); }],
   ['★ 中心軸の駅（見上げる）', () => go(STRIP_PHI[0] + 0.25, HUB_Z - 700, 120, 0, 1.0)],
   ['★ 中心軸の駅（間近）', () => go(STRIP_PHI[0] + 0.62, HUB_Z - 750, R - 520, 0.35, 0.42)],
   ['★ 無重力パーク駅（電車が止まる）', () => go(STRIP_PHI[0] + 0.45, ZG_Z - 330, R - 130, 0.15, 0.25)],
