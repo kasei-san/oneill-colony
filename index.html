@@ -111,7 +111,7 @@ const ANISO = renderer.capabilities.getMaxAnisotropy();
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
 scene.fog = new THREE.FogExp2(new THREE.Color(0xbcd0e8), 3.3e-4); // 密度は colonyFog の「地表換算距離」に掛ける係数
-const camera = new THREE.PerspectiveCamera(80, innerWidth / innerHeight, 0.5, 150000);
+const camera = new THREE.PerspectiveCamera(80, innerWidth / innerHeight, 0.5, 400000); // 遠くの僚コロニーまで描くため遠め
 
 // ===== 照明: 各陸地は「向かいの窓」から鏡で反射した太陽光を受ける =====
 const sunL = STRIP_PHI.map(p => new THREE.Vector3(-Math.cos(p), -Math.sin(p), 0)
@@ -1005,7 +1005,7 @@ const OMEGA = Math.sqrt(9.8 / R);                    // 約0.057 rad/s（約110�
 const spaceFrame = new THREE.Group(); scene.add(spaceFrame);
 const space = { on: false, mode: 'overview', az: 0.6, tilt: 2.2, dist: 26000, tz: -HL * 0.25 };
 const ENTRY_Z = -HL - 420;                            // 入口（-z 端の外側ドックの正面）
-const guideRings = [], extShips = [];
+const guideRings = [], extShips = [], otherColonies = [];
 let hullBeacons;
 function buildExterior() {
   // 外殻（陸地の裏側）と両端の外側の蓋
@@ -1067,6 +1067,45 @@ function buildExterior() {
   scene.add(new THREE.Mesh(new THREE.CylinderGeometry(320, 380, 500, 32).rotateX(Math.PI / 2).translate(0, 0, HL + 250), dockMat));
   for (let i = 0; i < 6; i++) scene.add(new THREE.Mesh(new THREE.BoxGeometry(900, 8, 380).translate(800, 0, HL + 280).rotateZ(i / 6 * TAU + 0.26), dockMat));
 
+  // 遠くの同型コロニー5基（簡易モデル）。どれも軸を太陽（+z）に向けて自転している
+  {
+    const [cc, cg] = canvas(1536, 64);
+    for (let i = 0; i < 6; i++) {                     // 周方向に陸地（外殻パネル）と窓（中の光が透ける）が交互
+      const x0 = i * 256;
+      if (i % 2 === 0) { cg.fillStyle = '#7b828c'; cg.fillRect(x0, 0, 256, 64); cg.fillStyle = '#5c626b'; for (let x = 0; x < 256; x += 32) cg.fillRect(x0 + x, 0, 2, 64); }
+      else { const gr = cg.createLinearGradient(x0, 0, x0 + 256, 0); gr.addColorStop(0, '#9fb8d8'); gr.addColorStop(0.5, '#d8e6f5'); gr.addColorStop(1, '#9fb8d8'); cg.fillStyle = gr; cg.fillRect(x0, 0, 256, 64); }
+    }
+    cg.fillStyle = 'rgba(40,44,50,0.8)'; for (let y = 0; y < 64; y += 4) cg.fillRect(0, y, 1536, 1);
+    const ctex = new THREE.CanvasTexture(cc); ctex.colorSpace = THREE.SRGBColorSpace;
+    const hullM = new THREE.MeshBasicMaterial({ map: ctex, color: 0xb8bcc4 });
+    const capM = new THREE.MeshBasicMaterial({ color: 0x8a9099 });
+    const mirM = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.15, 1.12, 1.05) });            // 鏡面（太陽側・内向き）: 照り返しで明るい
+    const mirBackM = new THREE.MeshBasicMaterial({ color: 0x3c4148, side: THREE.BackSide });             // 裏側: 反射しない板
+    const hullG = new THREE.CylinderGeometry(GLASS_R, GLASS_R, L, 48, 1, true).rotateX(Math.PI / 2);
+    const capG = new THREE.CircleGeometry(GLASS_R, 48);
+    const spots = [[-62000, 38000, 15000], [88000, -21000, -42000], [-30000, -96000, 30000], [140000, 70000, 60000], [-150000, 20000, -90000]];
+    for (const [x, y, z] of spots) {
+      const g = new THREE.Group();
+      g.add(new THREE.Mesh(hullG, hullM));
+      for (const sg of [-1, 1]) { const c = new THREE.Mesh(capG, capM); c.position.z = sg * HL; if (sg < 0) c.rotation.y = Math.PI; g.add(c); }
+      const al = rr(16, 26) * Math.PI / 180;
+      for (let k = 0; k < 3; k++) {
+        const psi = WIN_PHI[k], hw = GLASS_R * Math.sin(SECTOR / 2) * 1.04;
+        const pg = new THREE.PlaneGeometry(2 * hw, L);
+        const m = new THREE.Mesh(pg, mirM);
+        m.add(new THREE.Mesh(pg, mirBackM));
+        m.position.set(Math.cos(psi) * (GLASS_R + 60), Math.sin(psi) * (GLASS_R + 60), -HL);
+        m.rotation.z = psi - Math.PI / 2;            // 幅方向を周方向に
+        m.rotateX(Math.PI / 2 - al);                  // 端のヒンジから +z 側へ、外向きに開く
+        m.translateY(L / 2);
+        g.add(m);
+      }
+      g.position.set(x, y, z);
+      spaceFrame.add(g);
+      otherColonies.push({ g, ph: rand() * TAU });
+    }
+  }
+
   // 誘導灯: 入口から宇宙へまっすぐ伸びる4本の光の列（赤、全灯同時にゆっくり明滅）
   {
     const pts = [];
@@ -1107,6 +1146,7 @@ function buildExterior() {
   }
 }
 function updateSpace(t) {
+  for (const c of otherColonies) c.g.rotation.z = OMEGA * t + c.ph;
   spaceFrame.rotation.z = -OMEGA * t;
   if (hullBeacons) hullBeacons.material.opacity = (t % 1.5) < 0.15 ? 1 : 0.05;
   const pulse = 0.5 - 0.5 * Math.cos(t * TAU / 2.4);               // 2.4秒周期でゆっくり明滅
