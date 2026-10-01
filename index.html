@@ -3641,8 +3641,12 @@ const SNS_SHOTS = [
     from: () => go(STRIP_PHI[0] + 0.62, HUB_Z - 750, R - 520, 0.35, 0.42), d: { yaw: 0.25, z: 120 } },
   { ch: '観光名所', t: '新造船所', x: '重さのない軸のそばで\n大きな船を組み立てるのだ', dur: 4,
     from: () => aimCam(0.75 + 0.35, NEW_YARD_Z - 230, R - 330, new THREE.Vector3(Math.cos(0.75) * 140, Math.sin(0.75) * 140, NEW_YARD_Z)), d: { z: 100 } },
-  { ch: '観光名所', t: '無重力パーク', x: 'ガラスの球の中を\n泳ぐように漂うのだ', dur: 4,
-    from: preset('★ 無重力パーク（中心軸）'), d: { z: 160, pitch: -0.1 } },
+  { ch: '街区', t: 'ターミナル駅', x: '中央駅からのエレベーターが\n地上の鉄道とつながるのだ', dur: 4,
+    from: terminalShot, d: { z: 100, h: -50, yaw: 0.3 }, roll: 0.15 },
+  { ch: '街区', t: '農業区画', x: '最初の作物は枝豆\nずんだ餅のふるさとなのだ', dur: 5, from: () => {}, d: {},
+    follow: () => {                                  // 畑の上を周方向に低空飛行（PC版の農業区画の短縮版）
+      const u = Math.min(demo.t / SHOTLIST()[demo.i].dur, 1), th = STRIP_PHI[0] - 0.2 + 0.4 * u;
+      Object.assign(player, { th, z: -HL + 750 + 60 * Math.sin(u * Math.PI), h: 55 + 15 * Math.sin(u * Math.PI * 2), yaw: Math.PI / 2 + 0.2 * Math.sin(u * Math.PI), pitch: 0.06 }); }, roll: 0.12 },
   { ch: '昼のコロニー', t: '300万人の街', x: '円筒の内側を\nぐるりと街が囲むのだ', dur: 5,
     from: () => go(STRIP_PHI[0] + 0.12, 600, 700, 0, -0.32), d: { z: 600, pitch: 0.1 } },
   { ch: '夜が来る', t: 'ミラーが閉じる', x: '外のミラーが窓を覆うと\nコロニーに夜が来るのだ', dur: 8, night: 1,
