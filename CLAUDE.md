@@ -20,7 +20,8 @@
 7. 構造物・窓ガラス・キャップ・雲・宇宙側（星・ミラー・太陽・外殻・入口・誘導灯・外の宇宙船・兄弟コロニー）・船・軸の電車・地上の電車と駅（`stepTrains` で速度を積分、駅でランダム停車）・観光名所（`buildLandmarks`, `buildHubStation`, `buildResort`, `buildRiverside`, `buildNeonSigns`, `buildAdScreens`, `buildProtestBanners`）・周辺の車/人/鳥
 8. ポストエフェクト（自前: AO → 被写界深度 → ブルーム → トーンマップ・色調整・ディザ）
 9. 昼夜（`updateDayNight()`）、プレイヤー操作、`PRESETS`（ワープ）、ミニマップ、音（環境音・BGM とも WebAudio 合成）
-10. ガイドツアー `SHOTS`: 1場面 = `{ ch, t, x, dur, from, d }`（地上: from で開始位置、d で移動量）または `space: { mode, from, to, target }`（宇宙）。`follow` でカメラを毎フレーム動かす場面もある。開始位置のヘルパー: `preset(ラベル)`, `lookAt(k, as, az, bs, bz, h)`, `atSample(type)`
+10. ガイドツアー `SHOTS`（PC版）と `SNS_SHOTS`（`?sns` の縦長ダイジェスト。`SHOTLIST()` が今のモードの方を返す）: 1場面 = `{ ch, t, x, dur, from, d }`（地上: from で開始位置、d で移動量）または `space: { mode, from, to, target }`（宇宙）。`follow` でカメラを毎フレーム動かす場面、`orbit` で回り込む場面、`roll` でカメラを傾ける場面もある。開始位置のヘルパー: `preset(ラベル)`, `lookAt(k, as, az, bs, bz, h)`, `atSample(type)`, `aimCam(th, z, h, 目標)`
+11. 動画の書き出し `?sns&rec`: `window.__frame(dt)` で1コマずつ進め、BGM は `renderMusicWav` で OfflineAudioContext に合成する（`tools/record-sns.mjs`）。`?demo`・`?sns` はクリックで始める（自動で始めると BGM が鳴らない）
 
 ## はまりどころ
 
@@ -36,6 +37,9 @@
 - 両面表示の文字（看板・横断幕）は裏から見ると鏡文字になる。表だけにするか背中合わせに2枚置く
 - `build()` の中は変数が多い。新しい変数名が既存とぶつかるとページが読み込めなくなる
 - `updateDemo` の中で場面ごとの処理から `return` すると、次の場面へ進む判定に届かなくなる
+- ツアーの場面は前の場面が宇宙の視点のまま始まらないよう、`demoStartShot` で `leaveSpace()` してから `from()` を呼ぶ
+- Python のヒアドキュメントで index.html を書き換えるときは、JS の `'\n'` が本物の改行になって構文エラーになりやすい（raw 文字列を使う）
+- ヘッドレス Chrome は自動再生の制限がないので、音まわりの確認は AudioContext を suspended にする init script で真似る
 
 ## 変更したら
 
@@ -47,8 +51,13 @@
 - ガイドツアーの場面は「その区画が画面の大半を占める」「対象に寄る」「対象が建物に隠れない」。説明は簡潔に、場面は長すぎない
 - 夜は暖色の落ち着いた光。眩しすぎる光や、ボケて何かわからない状態は避ける
 - コロニーならではの設定（回転・無重力・円筒・ミラー）を活かす。設定と建物の見た目を歴史でつなげる
+- ツアーの字幕は、タイトルを左上に大きく（改行しない）、解説を右下に。カメラワークは単調にせず、動きのある場面は低空飛行や回転で見せる
+- ずんだもん要素は薄めに（字幕の語尾「のだ」くらいまで）
+- SNS 用の動画の書き出しは時間がかかるので、ユーザーの OK が出てから行う
 
 ## git
 
-- まだリモート（GitHub）はない。変更は小さめの単位でコミットしていく
+- リモートは https://github.com/kasei-san/oneill-colony 。main へ直接 push せず、ブランチ → PR を作り、マージはユーザーが行う。main は GitHub Pages（https://kasei-san.com/oneill-colony/ ）で公開される
+- 変更は小さめの単位でコミットしていく
+- `out/`（書き出した動画）は .gitignore 済み
 - コミットメッセージは日本語で「何を・なぜ」
