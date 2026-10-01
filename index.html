@@ -3635,9 +3635,9 @@ const SNS_SHOTS = [
     space: { mode: 'overview', from: { az: 0.4, tilt: 2.3, dist: 13000, tz: -HL, roll: 1.2 }, to: { az: 0.9, tilt: 2.4, dist: 11000, tz: -7000, roll: 1.35 } } },   // 蓋の側から斜めに。円筒を横倒しに見せ、蓋が回るのを見せる
   { ch: '入港', t: '宇宙港へ', x: '赤い誘導灯に沿って\n中へ入るのだ', dur: 6, fadeOut: true, fadeColor: '#ffffff',
     space: { mode: 'entrance', from: { az: 0.5, tilt: 2.75, dist: 2200, tz: ENTRY_Z - 6000 }, to: { az: 0.2, tilt: 3.05, dist: 500, tz: ENTRY_Z + 150 } } },
-  { ch: '円筒の内側', t: '空のかわりに街', x: '見上げると\n反対側の街が広がっているのだ', dur: 4, fadeIn: true, fadeColor: '#ffffff',
-    from: () => go(STRIP_PHI[0], -HL + 1800, R - 700, 0, -0.25), d: { z: 900, pitch: 0.12 }, roll: 0.5 },
-  { ch: '観光名所', t: 'コロニー中央駅', x: '無重力の軸の真ん中に\nネオンの蜂の巣なのだ', dur: 5,
+  { ch: '入港', t: '無重力の中心軸へ', x: '軸のまわりは無重力\n船と電車が行き来するのだ', dur: 5, fadeIn: true, fadeColor: '#ffffff',
+    from: preset('宇宙港の出口'), d: { z: 900, yaw: -0.1, pitch: -0.05 }, roll: 0.5 },
+  { ch: '観光名所', t: 'コロニー中央駅', x: 'もとは最初の造船所\n増築を重ねた蜂の巣の駅なのだ', dur: 5,
     from: () => go(STRIP_PHI[0] + 0.62, HUB_Z - 750, R - 520, 0.35, 0.42), d: { yaw: 0.25, z: 120 } },
   { ch: '観光名所', t: '新造船所', x: '重さのない軸のそばで\n大きな船を組み立てるのだ', dur: 4,
     from: () => aimCam(0.75 + 0.35, NEW_YARD_Z - 230, R - 330, new THREE.Vector3(Math.cos(0.75) * 140, Math.sin(0.75) * 140, NEW_YARD_Z)), d: { z: 100 } },
