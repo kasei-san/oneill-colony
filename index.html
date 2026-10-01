@@ -1,0 +1,1866 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>O'Neill Colony</title>
+<link rel="icon" href="data:,">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: system-ui, -apple-system, "Hiragino Sans", sans-serif; }
+  canvas#view { display: block; cursor: grab; }
+  canvas#view:active { cursor: grabbing; }
+  .panel { position: fixed; background: rgba(10, 16, 28, 0.72); color: #e6edf5; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 10px 12px; font-size: 12px; line-height: 1.55; backdrop-filter: blur(4px); user-select: none; }
+  #info { top: 12px; left: 12px; max-width: 300px; }
+  #info h1 { font-size: 14px; margin: 0 0 6px; font-weight: 600; }
+  #info .stat { font-variant-numeric: tabular-nums; color: #a9d1ff; }
+  #info .keys { margin-top: 6px; color: #b9c4d0; }
+  #warp { top: 12px; right: 12px; display: flex; flex-direction: column; gap: 4px; }
+  #warp button { background: rgba(255,255,255,0.08); color: #e6edf5; border: 1px solid rgba(255,255,255,0.18); border-radius: 5px; padding: 5px 10px; font-size: 12px; cursor: pointer; text-align: left; }
+  #warp button:hover { background: rgba(120,170,255,0.25); }
+  #mapbox { left: 12px; bottom: 12px; }
+  #mapbox canvas { display: block; cursor: crosshair; border-radius: 4px; }
+  #mapbox .cap { margin-bottom: 4px; color: #b9c4d0; }
+  #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: #cfe0f5; font-size: 16px; background: #000; z-index: 10; }
+  .hidden { display: none !important; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="loading">コロニーを建設中…</div>
+<div id="info" class="panel">
+  <h1>O'Neill Colony（島3号型）</h1>
+  <div>場所: <span class="stat" id="s-loc">-</span></div>
+  <div>高度: <span class="stat" id="s-alt">-</span> / 速度: <span class="stat" id="s-spd">-</span></div>
+  <div>FPS: <span class="stat" id="s-fps">-</span></div>
+  <div>サウンド: <span class="stat" id="s-snd">クリックかキー入力で開始</span></div>
+  <div class="keys">
+    ドラッグ: 視点 / WASD・矢印: 移動<br>
+    Shift: 高速 / E・Space: 上昇 / Q・C: 下降<br>
+    [ / ]: 画角 / B: ポストエフェクト切替 / T: トーンマップ ACES⇔AgX<br>
+    N: 昼⇔夜 / M: 音のミュート / H: パネル表示切替 / 左下の地図クリック: ワープ
+  </div>
+</div>
+<div id="warp" class="panel"></div>
+<div id="mapbox" class="panel">
+  <div class="cap">展開図（横=周方向 360° / 縦=軸方向）</div>
+  <canvas id="minimap" width="360" height="306"></canvas>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
+
+const LOW = new URLSearchParams(location.search).get('q') === 'low';
+
+// ===== コロニー寸法（メートル）。軸は Z、遠心「重力」は軸から外向き =====
+const R = 3000, L = 16000, HL = L / 2;
+const SECTOR = Math.PI / 3;              // 陸地3枚・窓3枚を60°ずつ交互に配置
+const STRIP_W = R * SECTOR;              // 陸地1枚の幅（弧長）
+const P = 110, ROAD = 16, BLK = P - ROAD; // 街区ピッチ・道路幅・街区内寸
+const NS = Math.floor(STRIP_W / P), NZ = Math.floor(L / P);
+const GLASS_R = R + 25;                  // 窓ガラスは地面より25m外側
+const STRIP_PHI = [0, 1, 2].map(k => (30 + 120 * k) * Math.PI / 180);
+const WIN_PHI = STRIP_PHI.map(p => p + SECTOR);
+const sCenter = i => (i - (NS - 1) / 2) * P;
+const zCenter = j => (j - (NZ - 1) / 2) * P;
+const BRIDGE_Z = [];
+for (let j = 6; j < NZ - 1; j += 10) BRIDGE_Z.push(zCenter(j) + P / 2);
+const RIVER_I = [7, 20, 10];
+
+function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const rand = mulberry32(20261001);
+const rr = (a, b) => a + (b - a) * rand();
+const pick = arr => arr[Math.floor(rand() * arr.length)];
+const TAU = Math.PI * 2;
+const normAng = a => ((a % TAU) + TAU) % TAU;
+const angDiff = (a, b) => { let d = normAng(a - b); return d > Math.PI ? d - TAU : d; };
+const stripOf = th => Math.floor((normAng(th) + Math.PI / 6) / (TAU / 3)) % 3;
+const isLand = th => Math.abs(angDiff(th, STRIP_PHI[stripOf(th)])) < SECTOR / 2;
+
+// 円筒上の局所フレーム（x=東(θ増加方向), y=上(軸方向へ), z=北(+Z)）に箱を置く行列
+function writeBox(a, o, th, z, h0, w, ht, d) {
+  const c = Math.cos(th), s = Math.sin(th), r = R - h0;
+  a[o] = -s * w; a[o + 1] = c * w; a[o + 2] = 0; a[o + 3] = 0;
+  a[o + 4] = -c * ht; a[o + 5] = -s * ht; a[o + 6] = 0; a[o + 7] = 0;
+  a[o + 8] = 0; a[o + 9] = 0; a[o + 10] = d; a[o + 11] = 0;
+  a[o + 12] = r * c; a[o + 13] = r * s; a[o + 14] = z; a[o + 15] = 1;
+}
+const _m = new THREE.Matrix4();
+const boxMatrix = (th, z, h0, w, ht, d) => { writeBox(_m.elements, 0, th, z, h0, w, ht, d); return _m; };
+const cyl = (r, th, z) => new THREE.Vector3(r * Math.cos(th), r * Math.sin(th), z);
+
+// ===== レンダラ =====
+const renderer = new THREE.WebGLRenderer({ antialias: false, logarithmicDepthBuffer: true, powerPreference: 'high-performance' });
+renderer.domElement.id = 'view';
+renderer.setPixelRatio(Math.min(devicePixelRatio, LOW ? 1 : 1.5));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+const ANISO = renderer.capabilities.getMaxAnisotropy();
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000);
+scene.fog = new THREE.FogExp2(new THREE.Color(0xbcd0e8), 3.3e-4); // 密度は colonyFog の「地表換算距離」に掛ける係数
+const camera = new THREE.PerspectiveCamera(80, innerWidth / innerHeight, 0.5, 150000);
+
+// ===== 照明: 各陸地は「向かいの窓」から鏡で反射した太陽光を受ける =====
+const sunL = STRIP_PHI.map(p => new THREE.Vector3(-Math.cos(p), -Math.sin(p), 0)
+  .addScaledVector(new THREE.Vector3(-Math.sin(p), Math.cos(p), 0), 0.25)
+  .add(new THREE.Vector3(0, 0, -0.3)).normalize());
+// 円筒用の空気遠近法: 霧の濃さを「軸からの距離（=高度）」で決め、視線に沿って積分する。
+// 地表付近は濃く軸付近は薄い。遠いほど青く霞み、太陽（採光窓）の方向は暖色に光る。
+{
+  const v = l => `vec3(${l.x.toFixed(5)}, ${l.y.toFixed(5)}, ${l.z.toFixed(5)})`;
+  THREE.ShaderChunk.fog_pars_vertex = `#ifdef USE_FOG
+    varying float vFogDepth; varying vec3 vFogWorld;
+  #endif`;
+  THREE.ShaderChunk.fog_vertex = `#ifdef USE_FOG
+    vFogDepth = - mvPosition.z;
+    vFogWorld = cameraPosition + transpose(mat3(viewMatrix)) * mvPosition.xyz;
+  #endif`;
+  THREE.ShaderChunk.fog_pars_fragment = `#ifdef USE_FOG
+    uniform vec3 fogColor; varying float vFogDepth; varying vec3 vFogWorld;
+    #ifdef FOG_EXP2
+      uniform float fogDensity;
+    #else
+      uniform float fogNear; uniform float fogFar;
+    #endif
+    float colonyFogDens(vec3 p) { return 0.3 + 0.7 * exp(-max(${R.toFixed(1)} - length(p.xy), 0.0) / 1000.0); }
+  #endif`;
+  THREE.ShaderChunk.fog_fragment = `#ifdef USE_FOG
+    vec3 fogD = vFogWorld - cameraPosition;
+    float fogL = length(fogD), fogDe = 0.0;
+    for (int fi = 0; fi < 8; fi++) fogDe += colonyFogDens(cameraPosition + fogD * ((float(fi) + 0.5) / 8.0));
+    fogDe *= fogL / 8.0;
+    #ifdef FOG_EXP2
+      vec3 fogT = fogDe * fogDensity * vec3(0.82, 0.95, 1.12);
+    #else
+      vec3 fogT = vec3(fogDe / fogFar);
+    #endif
+    vec3 fogF = 1.0 - exp(-fogT * fogT);
+    float fogFactor = dot(fogF, vec3(1.0 / 3.0));
+    float fogAng = atan(cameraPosition.y, cameraPosition.x);
+    float fogK = mod(floor((fogAng + 0.5235988) / 2.0943951), 3.0);
+    vec3 fogSun = fogK < 0.5 ? ${v(sunL[0])} : (fogK < 1.5 ? ${v(sunL[1])} : ${v(sunL[2])});
+    float fogMie = pow(max(dot(fogD / max(fogL, 1e-3), fogSun), 0.0), 6.0) * smoothstep(0.08, 0.5, dot(fogColor, vec3(0.333)));
+    vec3 fogCol = fogColor + vec3(1.0, 0.82, 0.58) * fogMie * 0.9;
+    gl_FragColor.rgb = gl_FragColor.rgb * (1.0 - fogF) + fogCol * fogF;
+  #endif`;
+}
+
+const U = {
+  uSunL: { value: sunL },
+  uSkyAmb: { value: new THREE.Color(0.40, 0.48, 0.60) },
+  uGndAmb: { value: new THREE.Color(0.20, 0.19, 0.17) },
+  uDetail: { value: null },
+  uEnv: { value: null },
+  uTime: { value: 0 },
+  uNight: { value: 0 },  // 0=昼, 1=夜
+};
+const sun = new THREE.DirectionalLight(0xfff2e0, 3.3);
+sun.castShadow = true;
+sun.shadow.mapSize.set(LOW ? 2048 : 4096, LOW ? 2048 : 4096);
+sun.shadow.camera.up.set(0, 0, 1); // 既定の Y-up だと真上から照らす陸地で lookAt が縮退する
+sun.shadow.camera.near = 1500; sun.shadow.camera.far = 3400;
+sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.6;
+scene.add(sun, sun.target);
+
+// 標準マテリアルに「位置ごとの太陽方向」「円筒用の半球環境光」などを注入する
+function patch(mat, opts = {}) {
+  const key = 'colony-' + (opts.building ? 'b' : '') + (opts.ground ? 'g' : '') + (opts.wind ? 'w' : '');
+  mat.customProgramCacheKey = () => key;
+  mat.onBeforeCompile = sh => {
+    sh.uniforms.uSunL = U.uSunL; sh.uniforms.uSkyAmb = U.uSkyAmb; sh.uniforms.uGndAmb = U.uGndAmb; sh.uniforms.uNight = U.uNight;
+    if (opts.ground) sh.uniforms.uDetail = U.uDetail;
+    if (opts.wind) {
+      sh.uniforms.uTime = U.uTime;
+      // 風: 高い所ほど大きく、木ごとに位相をずらして揺らす（単位座標なので幹の根元は動かない）
+      sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+        { float ph = dot(instanceMatrix[3].xyz, vec3(0.013, 0.017, 0.011));
+          float sw = (sin(uTime * 1.3 + ph) * 0.6 + sin(uTime * 3.1 + ph * 2.7) * 0.25) * position.y * position.y;
+          transformed.x += sw * 0.05; transformed.z += sw * 0.035 * cos(uTime * 0.7 + ph); }`);
+    }
+    let vs = 'varying vec3 vCW;\n'
+      + (opts.building ? 'varying vec3 vBL; varying vec3 vBN; varying vec3 vBS; varying vec3 vVL; varying float vBId;\n' : '')
+      + (opts.ground ? 'attribute vec2 duv; varying vec2 vDuv;\n' : '') + sh.vertexShader;
+    vs = vs.replace('#include <project_vertex>', `#include <project_vertex>
+      { vec4 cw = vec4(transformed, 1.0);
+      #ifdef USE_INSTANCING
+        cw = instanceMatrix * cw;
+      #endif
+        vCW = (modelMatrix * cw).xyz; }
+      ${opts.building ? `
+        vBS = vec3(length(instanceMatrix[0].xyz), length(instanceMatrix[1].xyz), length(instanceMatrix[2].xyz));
+        vBL = position * vBS; vBN = normal;
+        { vec3 vw = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz - cameraPosition;
+          vVL = vec3(dot(vw, instanceMatrix[0].xyz) / vBS.x, dot(vw, instanceMatrix[1].xyz) / vBS.y, dot(vw, instanceMatrix[2].xyz) / vBS.z);
+          vec3 q = fract(instanceMatrix[3].xyz * 0.1031); q += dot(q, q.zyx + 31.32); vBId = fract((q.x + q.y) * q.z); }` : ''}
+      ${opts.ground ? 'vDuv = duv;' : ''}`);
+    let fs = `varying vec3 vCW; uniform vec3 uSunL[3]; uniform vec3 uSkyAmb; uniform vec3 uGndAmb; uniform float uNight;
+      ${opts.building ? `varying vec3 vBL; varying vec3 vBN; varying vec3 vBS; varying vec3 vVL; varying float vBId;
+        float bHash(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
+        float bNoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(bHash(vec3(i, 0.0)), bHash(vec3(i + vec2(1, 0), 0.0)), f.x), mix(bHash(vec3(i + vec2(0, 1), 0.0)), bHash(vec3(i + vec2(1, 1), 0.0)), f.x), f.y); }` : ''}
+      ${opts.ground ? 'uniform sampler2D uDetail; varying vec2 vDuv;' : ''}
+      vec3 colonySunDir() {
+        float ang = atan(vCW.y, vCW.x);
+        float k = mod(floor((ang + 0.5235988) / 2.0943951), 3.0);
+        vec3 l = k < 0.5 ? uSunL[0] : (k < 1.5 ? uSunL[1] : uSunL[2]);
+        return normalize((viewMatrix * vec4(l, 0.0)).xyz);
+      }\n` + sh.fragmentShader;
+    fs = fs.replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin.replace(
+      'getDirectionalLightInfo( directionalLight, directLight );',
+      'getDirectionalLightInfo( directionalLight, directLight ); directLight.direction = colonySunDir();'));
+    if (opts.ground) {
+      fs = fs.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        if (uNight > 0.001) {
+          // 遠景用: 街区の中にランダムな明かりの点（低いビルや家の窓のかわり）。公園(緑)と川(青)は除く
+          { vec3 bc = diffuseColor.rgb;
+            float built = (1.0 - step(bc.r * 1.12, bc.g)) * (1.0 - step(bc.r * 1.25, bc.b));
+            vec2 lc = vDuv * 12.0, lfw = fwidth(lc);
+            vec2 cell = floor(lc);
+            vec3 q = fract(vec3(cell, 3.7) * 0.1031); q += dot(q, q.zyx + 31.32); float hh = fract((q.x + q.y) * q.z);
+            float spot = step(0.8, hh) * (1.0 - smoothstep(0.15, 0.35, length(fract(lc) - 0.5)));
+            float lt = mix(spot * (0.6 + 2.0 * (hh - 0.8)), 0.045, smoothstep(0.4, 1.2, max(lfw.x, lfw.y)));
+            totalEmissiveRadiance += uNight * built * lt * vec3(1.0, 0.78, 0.5) * 1.6; }
+          vec2 fd = abs(fract(vDuv + 0.5) - 0.5);                  // 街区タイル端（=道路中心）までの距離
+          float road = 1.0 - smoothstep(0.06, 0.075, min(fd.x, fd.y));
+          float along = fd.x < fd.y ? vDuv.y : vDuv.x;
+          float lamp = pow(0.5 + 0.5 * cos(along * 6.2832 * 4.4), 6.0); // 約25mおきの街灯の光だまり
+          totalEmissiveRadiance += uNight * road * (0.03 + 0.35 * lamp) * vec3(1.0, 0.72, 0.4);
+        }`);
+      fs = fs.replace('#include <map_fragment>', `#include <map_fragment>
+        { vec4 dt = texture2D(uDetail, vDuv);
+          float fade = clamp(1.0 - length(vViewPosition) / 2500.0, 0.0, 1.0);
+          vec3 b = diffuseColor.rgb * (dt.r * 2.0);
+          b = mix(b, vec3(0.75), dt.b);
+          diffuseColor.rgb = mix(diffuseColor.rgb, b, fade); }`);
+    }
+    if (opts.building) {
+      fs = fs.replace('#include <color_fragment>', `#include <color_fragment>
+        float winMask = 0.0; vec3 winRoom = vec3(0.0);
+        // 建物ごとの色ムラと低周波の汚れ
+        diffuseColor.rgb *= 0.88 + 0.22 * vBId;
+        diffuseColor.rgb *= 0.9 + 0.2 * bNoise(vCW.xy * 0.05 + vCW.z * 0.03 + vBId * 17.0);
+        if (abs(vBN.y) < 0.5) {
+          bool xFace = abs(vBN.x) > 0.5;
+          float hc = xFace ? vBL.z : vBL.x, halfW = 0.5 * (xFace ? vBS.z : vBS.x);
+          vec2 g = vec2(hc / 3.2, vBL.y / 3.6);
+          vec2 f = fract(g);
+          vec2 fw = max(fwidth(g), vec2(1e-4));
+          float mx = smoothstep(0.15 - fw.x, 0.15 + fw.x, f.x) - smoothstep(0.85 - fw.x, 0.85 + fw.x, f.x);
+          float my = smoothstep(0.28 - fw.y, 0.28 + fw.y, f.y) - smoothstep(0.88 - fw.y, 0.88 + fw.y, f.y);
+          float m = clamp(mx, 0.0, 1.0) * clamp(my, 0.0, 1.0);
+          m *= step(1.0, halfW - abs(hc)) * step(vBL.y, vBS.y - 1.0); // 角と屋上の縁には窓を作らない
+          float lod = smoothstep(0.35, 0.9, max(fw.x, fw.y));
+          winMask = mix(m, 0.42, lod);
+          // 窓の奥の部屋（interior mapping）: 窓セルの奥に箱部屋があるとしてレイを飛ばす
+          if (m > 0.01 && lod < 0.99) {
+            vec3 dv = normalize(vVL);
+            vec3 d = vec3(dot(dv, xFace ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0)), dv.y, dot(dv, -vBN));
+            vec3 room = vec3(3.2, 3.6, 5.0), p0 = vec3(f.x * 3.2, f.y * 3.6, 0.0);
+            vec3 tt = (step(0.0, d) * room - p0) / d;
+            float t = min(min(tt.x, tt.y), tt.z);
+            vec3 hp = p0 + d * t;
+            float rid = bHash(vec3(floor(g), vBId * 131.0));
+            vec3 c = t == tt.z ? mix(vec3(0.75, 0.68, 0.58), vec3(0.55, 0.62, 0.70), rid)   // 奥の壁
+                   : t == tt.y ? (d.y > 0.0 ? vec3(0.9, 0.9, 0.86) : vec3(0.32, 0.25, 0.2)) // 天井 / 床
+                   : vec3(0.62, 0.6, 0.56);                                                   // 横の壁
+            c *= mix(1.0, 0.55, hp.z / room.z);
+            float on = step(mix(0.3, 0.55, uNight), rid);                   // 夜は約半分の部屋だけ点灯
+            winRoom = c * mix(vec3(1.0), vec3(1.2, 0.95, 0.66), uNight) * mix(mix(0.25, 1.0, on), on, uNight);
+          }
+          // 遠くは部屋の計算をせず、平均的な明るさ（建物ごとに少しばらつく）で光らせる
+          // 遠くは窓をまとめたブロック単位でランダムに点灯（距離に応じてブロックを大きくする）
+          { float lv = clamp(floor(log2(max(max(fw.x, fw.y), 1e-3) * 1.5)) + 1.0, 0.0, 6.0);
+            vec2 cid = floor(g / exp2(lv));
+            float onF = step(mix(0.3, 0.55, uNight), bHash(vec3(cid, vBId * 91.0 + lv)));
+            vec3 farRoom = vec3(0.75, 0.6, 0.42) * (0.5 + 0.6 * bHash(vec3(cid + 7.0, vBId * 13.0))) * mix(0.6, onF * 1.5, uNight);
+            winRoom = mix(winRoom, farRoom, lod); }
+          float rnd = bHash(vec3(floor(g), vBId * 57.0));
+          diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.16, 0.19, 0.24), vec3(0.42, 0.47, 0.54), rnd * rnd), winMask);
+          // 角・屋上の縁を明るく（面取りの代わり）
+          float eDist = min(halfW - abs(hc), vBS.y - vBL.y);
+          float eW = max(0.3, fwidth(hc) * 1.5);
+          diffuseColor.rgb *= 1.0 + 0.3 * (1.0 - smoothstep(0.0, eW, eDist)) * (1.0 - winMask);
+          // 足元ほど暗く（接地AO）
+          diffuseColor.rgb *= mix(0.5, 1.0, smoothstep(0.0, 7.0, vBL.y));
+        } else if (vBN.y > 0.5) {
+          float eDist = min(0.5 * vBS.x - abs(vBL.x), 0.5 * vBS.z - abs(vBL.z));
+          diffuseColor.rgb *= 0.8 * (1.0 + 0.35 * (1.0 - smoothstep(0.0, max(0.6, fwidth(vBL.x) * 2.0), eDist)));
+        }`);
+      fs = fs.replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+        roughnessFactor = mix(roughnessFactor, 0.05, winMask);`);
+      fs = fs.replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
+        metalnessFactor = mix(metalnessFactor, 0.5, winMask);`);
+      // 部屋の明かりは自発光扱い。斜めから見るほど反射に負けて見えなくなる
+      fs = fs.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        totalEmissiveRadiance += winRoom * winMask * mix(1.0, 1.4, uNight) * (1.0 - (1.0 - uNight) * pow(1.0 - abs(dot(normal, normalize(vViewPosition))), 2.0));`);
+    }
+    fs = fs.replace('#include <opaque_fragment>', `{
+        vec3 upW = -normalize(vec3(vCW.xy, 0.0) + vec3(1e-5));
+        vec3 upV = normalize((viewMatrix * vec4(upW, 0.0)).xyz);
+        float hk = dot(normal, upV) * 0.5 + 0.5;
+        outgoingLight += diffuseColor.rgb * mix(uGndAmb, uSkyAmb, hk) * (1.0 - metalnessFactor);
+        // 照り返し: 太陽と反対の水平方向から、地面に反射した弱い暖色光
+        vec3 sunV = colonySunDir(), bounceV = sunV - upV * dot(sunV, upV);
+        bounceV = -normalize(bounceV + upV * 1e-4);
+        outgoingLight += diffuseColor.rgb * vec3(0.32, 0.26, 0.2) * max(dot(normal, bounceV), 0.0) * (1.0 - metalnessFactor) * 0.5;
+      }
+      #include <opaque_fragment>`);
+    sh.vertexShader = vs; sh.fragmentShader = fs;
+  };
+  return mat;
+}
+
+// ===== テクスチャ =====
+function canvas(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return [c, c.getContext('2d')]; }
+
+// 街区1つ分の近景ディテール（R=明度倍率, B=白線マスク）。1タイル=1街区で繰り返す
+function makeDetailTex() {
+  const S = 256, rp = (ROAD / 2) / P * S, sw = 3.5 / P * S;
+  const [ca, a] = canvas(S, S), [cb, b] = canvas(S, S);
+  a.fillStyle = 'rgb(128,128,128)'; a.fillRect(0, 0, S, S);
+  for (let n = 0; n < 4000; n++) { const v = 118 + Math.random() * 20 | 0; a.fillStyle = `rgb(${v},${v},${v})`; a.fillRect(Math.random() * S, Math.random() * S, 2, 2); }
+  const wrapRect = (g, x, y, w, h) => { for (const ox of [-S, 0, S]) for (const oy of [-S, 0, S]) g.fillRect(x + ox, y + oy, w, h); };
+  // 歩道（明るめ）
+  a.fillStyle = 'rgb(165,165,165)';
+  wrapRect(a, -rp, 0, 2 * rp, S); wrapRect(a, 0, -rp, S, 2 * rp);
+  // 車道（アスファルト）
+  const road = rp - sw;
+  a.fillStyle = 'rgb(122,122,122)';
+  wrapRect(a, -road, 0, 2 * road, S); wrapRect(a, 0, -road, S, 2 * road);
+  for (let n = 0; n < 3000; n++) {
+    const v = 105 + Math.random() * 35 | 0; a.fillStyle = `rgb(${v},${v},${v})`;
+    const t = Math.random() * S, o = (Math.random() * 2 - 1) * road;
+    if (Math.random() < 0.5) a.fillRect(o < 0 ? S + o : o, t, 1, 1); else a.fillRect(t, o < 0 ? S + o : o, 1, 1);
+  }
+  // 歩道の目地
+  a.fillStyle = 'rgb(140,140,140)';
+  for (let t = 0; t < S; t += 6) { wrapRect(a, road, t, sw, 1); wrapRect(a, -rp, t, sw, 1); wrapRect(a, t, road, 1, sw); wrapRect(a, t, -rp, 1, sw); }
+  // 白線: 中央破線・横断歩道
+  b.fillStyle = '#000'; b.fillRect(0, 0, S, S); b.fillStyle = '#fff';
+  for (let t = rp + 6; t < S - rp - 6; t += 14) { wrapRect(b, -1, t, 2, 7); wrapRect(b, t, -1, 7, 2); }
+  for (let x = -road + 2; x < road - 2; x += 4) { wrapRect(b, x, rp + 1, 2, 9); wrapRect(b, x, S - rp - 10, 2, 9); wrapRect(b, rp + 1, x, 9, 2); wrapRect(b, S - rp - 10, x, 9, 2); }
+  const da = a.getImageData(0, 0, S, S).data, db = b.getImageData(0, 0, S, S).data;
+  const out = new Uint8Array(S * S * 4);
+  for (let p = 0; p < S * S * 4; p += 4) { out[p] = da[p]; out[p + 1] = da[p]; out[p + 2] = db[p]; out[p + 3] = 255; }
+  const tex = new THREE.DataTexture(out, S, S, THREE.RGBAFormat);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.anisotropy = ANISO;
+  tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.generateMipmaps = true;
+  tex.needsUpdate = true;
+  return tex;
+}
+U.uDetail.value = makeDetailTex();
+
+function gradientSprite(stops) {
+  const [c, g] = canvas(256, 256);
+  const gr = g.createRadialGradient(128, 128, 0, 128, 128, 128);
+  for (const [o, col] of stops) gr.addColorStop(o, col);
+  g.fillStyle = gr; g.fillRect(0, 0, 256, 256);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+
+// ===== マテリアル =====
+const M = {
+  bld: patch(new THREE.MeshStandardMaterial({ roughness: 0.8, metalness: 0.05 }), { building: true }),
+  roof: patch(new THREE.MeshStandardMaterial({ roughness: 0.85 })),
+  tree: patch(new THREE.MeshStandardMaterial({ roughness: 0.95, vertexColors: true }), { wind: true }),
+  water: patch(new THREE.MeshStandardMaterial({ color: 0x1d3f52, roughness: 0.03, metalness: 0.0 })),
+  concrete: patch(new THREE.MeshStandardMaterial({ color: 0xc4c0b8, roughness: 0.85, side: THREE.DoubleSide })),
+  deck: patch(new THREE.MeshStandardMaterial({ color: 0x6b6e73, roughness: 0.9 })),
+  car: patch(new THREE.MeshStandardMaterial({ roughness: 0.25, metalness: 0.5 })),
+  steel: patch(new THREE.MeshStandardMaterial({ color: 0x8d939b, roughness: 0.5, metalness: 0.5 })),
+};
+
+// 川のさざ波（タイル可能な法線マップ）
+M.water.normalMap = (() => {
+  const S = 256, h = new Float32Array(S * S), out = new Uint8Array(S * S * 4);
+  const waves = Array.from({ length: 14 }, () => [1 + Math.floor(rand() * 9), Math.floor(rand() * 9) - 4, rand() * TAU, 0.3 + rand()]);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    let v = 0; for (const [fx, fy, ph, a] of waves) v += a / (fx + Math.abs(fy)) * Math.sin(TAU * (fx * x + fy * y) / S + ph);
+    h[y * S + x] = v;
+  }
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const dx = h[y * S + (x + 1) % S] - h[y * S + (x + S - 1) % S], dy = h[((y + 1) % S) * S + x] - h[((y + S - 1) % S) * S + x];
+    const n = new THREE.Vector3(-dx * 6, -dy * 6, 1).normalize(), o = (y * S + x) * 4;
+    out[o] = (n.x * 0.5 + 0.5) * 255; out[o + 1] = (n.y * 0.5 + 0.5) * 255; out[o + 2] = (n.z * 0.5 + 0.5) * 255; out[o + 3] = 255;
+  }
+  const t = new THREE.DataTexture(out, S, S); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(5, 5);
+  t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter; t.needsUpdate = true;
+  return t;
+})();
+M.water.normalScale.set(0.35, 0.35);
+
+// 環境反射: プレイヤー位置からのキューブマップ（描画中の自己参照を避けるため2枚を交互に使う）
+const envRTs = [0, 1].map(() => new THREE.WebGLCubeRenderTarget(LOW ? 128 : 256, { type: THREE.HalfFloatType }));
+const cubeCam = new THREE.CubeCamera(1, 150000, envRTs[0]);
+M.detail = patch(new THREE.MeshStandardMaterial({ roughness: 0.75 }));
+M.carShape = patch(new THREE.MeshStandardMaterial({ roughness: 0.25, metalness: 0.5, vertexColors: true }));
+M.ship = patch(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0.15 }));
+const envMats = [M.bld, M.water, M.car, M.ship, M.carShape];
+M.bld.envMapIntensity = 0.9; M.water.envMapIntensity = 1.4; M.car.envMapIntensity = 1.0;
+let envCur = 0, envTimer = 99;
+const glassMeshes = []; // 映り込み撮影時は隠す（ガラスが前回の映り込みを写し込み続けるのを防ぐ）
+const envPos = new THREE.Vector3(1e9, 0, 0);
+const setEnv = () => { for (const m of envMats) m.envMap = envRTs[envCur].texture; U.uEnv.value = envRTs[envCur].texture; };
+setEnv();
+function updateEnv(dt) {
+  envTimer += dt;
+  const moved = camera.position.distanceTo(envPos);
+  if (!(envTimer > 4 || (moved > 30 && envTimer > 0.4))) return;
+  envTimer = 0; envPos.copy(camera.position);
+  cubeCam.renderTarget = envRTs[1 - envCur];
+  cubeCam.position.copy(camera.position); cubeCam.updateMatrixWorld();
+  const au = renderer.shadowMap.autoUpdate; renderer.shadowMap.autoUpdate = false;
+  for (const g of glassMeshes) g.visible = false;
+  cubeCam.update(renderer, scene);
+  for (const g of glassMeshes) g.visible = true;
+  renderer.shadowMap.autoUpdate = au;
+  envCur = 1 - envCur; setEnv();
+}
+
+const GEO = {
+  box: new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0),
+  roof: new THREE.ConeGeometry(Math.SQRT1_2, 1, 4, 1).rotateY(Math.PI / 4).translate(0, 0.5, 0),
+  tree: (() => {
+    const colorize = (g, c) => { const n = g.attributes.position.count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) a.set(c, i * 3); g.setAttribute('color', new THREE.BufferAttribute(a, 3)); return g; };
+    const trunk = colorize(new THREE.CylinderGeometry(0.05, 0.07, 0.4, 5).translate(0, 0.2, 0).toNonIndexed(), [0.55, 0.42, 0.3]);
+    const crown = colorize(new THREE.IcosahedronGeometry(0.42, 0).translate(0, 0.62, 0), [1, 1, 1]);
+    return mergeGeometries([trunk, crown]);
+  })(),
+};
+
+const PAL = {
+  office: [0xcdc9c1, 0xb7b9bd, 0xd9d3c5, 0xa3abb4, 0x8b9aac, 0xe4e0d8, 0xaca69b],
+  glass: [0x6c8298, 0x5a6f88, 0x7c93a7, 0x8aa1b2, 0x4f6478],
+  house: [0xf1ece1, 0xe6dccb, 0xd9cfbd, 0xcac3b6, 0xf4f1eb, 0xd8c6a8, 0xbfc8cc],
+  roof: [0x55514c, 0x7a4033, 0x4a5866, 0x8a5b3d, 0x3d4045, 0x67704f],
+  tree: [0x4b7733, 0x5a873a, 0x3c672f, 0x6a8e44, 0x4f7f3f],
+  car: [0xf2f2f2, 0x1b1c1f, 0xb5b8bd, 0xa8231d, 0x1f4f9a, 0x6b6f75, 0xe7d9b8],
+};
+const hexCss = h => '#' + h.toString(16).padStart(6, '0');
+const darken = (h, f) => { const c = new THREE.Color(h); c.multiplyScalar(f); return '#' + c.getHexString(); };
+
+// ===== 街の生成 =====
+const chunks = new Map();
+const blockTypes = [[], [], []]; // [k][i * NZ + j] = 'down' | 'mid' | 'res' | 'park' | 'river'
+const landmarks = { tallest: [], parks: [], cbd: [] };
+const waterRecs = [];
+const stripCanvases = [];
+
+function getChunk(k, i, j) {
+  const key = `${k}-${Math.floor(i / 14)}-${Math.floor(j / 10)}`;
+  let c = chunks.get(key);
+  if (!c) { c = { k, sSum: 0, zSum: 0, n: 0, bld: [], roof: [], tree: [], far: [] }; chunks.set(key, c); }
+  return c;
+}
+
+function genStrip(k) {
+  const phi = STRIP_PHI[k], river = RIVER_I[k];
+  const [cv, g] = canvas(512, 2560);
+  g.setTransform(cv.width / STRIP_W, 0, 0, cv.height / L, cv.width / 2, cv.height / 2);
+  g.fillStyle = '#a39c8f'; g.fillRect(-STRIP_W / 2, -HL, STRIP_W, L);
+  g.fillStyle = '#44474c'; g.fillRect(-NS * P / 2 - ROAD / 2, -HL, NS * P + ROAD, L);
+
+  const cbds = [];
+  for (let n = 0; n < 3; n++) { let s; do { s = rr(-900, 900); } while (Math.abs(s - sCenter(river)) < 250); cbds.push({ s, z: -6000 + n * 6000 + rr(-1500, 1500) }); }
+  const bigParks = [];
+  for (let n = 0; n < 2; n++) {
+    let i0; do { i0 = 2 + Math.floor(rand() * (NS - 7)); } while (river >= i0 - 1 && river <= i0 + 4);
+    bigParks.push({ i0, i1: i0 + 3, j0: 20 + n * 70 + Math.floor(rand() * 30), nj: 5 });
+  }
+  bigParks.forEach(p => { p.j1 = p.j0 + p.nj - 1; });
+  const cbdF = (s, z) => Math.max(...cbds.map(c => Math.exp(-(((z - c.z) / 1600) ** 2) - (((s - c.s) / 650) ** 2))));
+  let tallest = { h: 0 };
+
+  const th = s => phi + s / R;
+  const rect = (col, s, z, w, d) => { g.fillStyle = col; g.fillRect(s - w / 2, z - d / 2, w, d); };
+  const addB = (ch, s, z, w, d, h0, h, col, flatTop = true) => {
+    const rec = [th(s), z, h0, w, h, d, col];
+    ch.bld.push(...rec);
+    if (h0 + h >= 20) ch.far.push(...rec);
+    if (flatTop) rect(darken(col, 0.72), s, z, w, d);
+    if (h0 + h > tallest.h) tallest = { s, z, d, h: h0 + h };
+  };
+  const addHouse = (ch, s, z, w, d, h, wall, roofCol, rh) => {
+    addB(ch, s, z, w, d, 0, h, wall, false);
+    ch.roof.push(th(s), z, h, w, rh, d, roofCol);
+    rect(hexCss(roofCol), s, z, w, d);
+  };
+  const addTree = (ch, s, z, size) => {
+    ch.tree.push(th(s), z, 0, size * 0.8, size, size * 0.8, pick(PAL.tree));
+    g.fillStyle = '#3f6a30'; g.beginPath(); g.arc(s, z, size * 0.35, 0, TAU); g.fill();
+  };
+
+  for (let i = 0; i < NS; i++) for (let j = 0; j < NZ; j++) {
+    const s = sCenter(i), z = zCenter(j), ch = getChunk(k, i, j);
+    ch.sSum += s; ch.zSum += z; ch.n++;
+    const cb = cbdF(s, z), c = Math.abs(s) / (STRIP_W / 2);
+    let type;
+    if (i === river) type = 'river';
+    else if (i === 0 || i === NS - 1) type = 'park';
+    else if (bigParks.some(p => i >= p.i0 && i <= p.i1 && j >= p.j0 && j <= p.j1)) type = 'park';
+    else if (Math.abs(i - river) === 1 && rand() < 0.45) type = 'park';
+    else if (rand() < 0.06) type = 'park';
+    else if (rand() < cb * 1.15) type = 'down';
+    else if (rand() < 0.3 + 0.35 * (1 - c) + cb * 0.3) type = 'mid';
+    else type = 'res';
+    blockTypes[k][i * NZ + j] = type;
+
+    if (type === 'river') {
+      rect('#3a6c88', s, z, BLK, BLK);
+      waterRecs.push(th(s), z, 0, BLK, 0.25, BLK);
+      continue;
+    }
+    if (type === 'park') {
+      rect('#5c8a45', s, z, BLK, BLK);
+      if (i === 0 || i === NS - 1) { for (let n = 0; n < (LOW ? 8 : 16); n++) addTree(ch, s + rr(-BLK / 2 + 4, BLK / 2 - 4), z + rr(-BLK / 2 + 4, BLK / 2 - 4), rr(7, 13)); continue; }
+      g.strokeStyle = 'rgba(203,189,150,0.55)'; g.lineWidth = 2.5;
+      g.beginPath(); g.moveTo(s - BLK / 2, z - BLK / 2); g.lineTo(s + BLK / 2, z + BLK / 2); g.moveTo(s + BLK / 2, z - BLK / 2); g.lineTo(s - BLK / 2, z + BLK / 2); g.stroke();
+      const nt = LOW ? 16 : 34;
+      for (let n = 0; n < nt; n++) {
+        const ts = s + rr(-BLK / 2 + 4, BLK / 2 - 4), tz = z + rr(-BLK / 2 + 4, BLK / 2 - 4);
+        if (Math.abs(Math.abs(ts - s) - Math.abs(tz - z)) < 4) continue; // 園路をあける
+        addTree(ch, ts, tz, rr(7, 14));
+      }
+      continue;
+    }
+    if (type === 'down') {
+      rect('#8f9297', s, z, BLK, BLK);
+      if (rand() < 0.3) {
+        const h = rr(70, 130) + 170 * cb * rand();
+        addB(ch, s, z, BLK * 0.94, BLK * 0.94, 0, rr(8, 14), pick(PAL.office));
+        const w = rr(0.48, 0.72) * BLK, d = rr(0.48, 0.72) * BLK;
+        addB(ch, s, z, w, d, 0, h, pick(PAL.glass));
+        addB(ch, s, z, w * 0.6, d * 0.6, h, rr(6, 18), pick(PAL.office));
+      } else {
+        const lot = BLK / 2;
+        for (let a = 0; a < 2; a++) for (let b = 0; b < 2; b++) {
+          const cs = s + (a - 0.5) * lot, cz = z + (b - 0.5) * lot;
+          const h = 25 + (40 + 140 * cb) * rand() ** 1.5, w = lot * rr(0.72, 0.92), d = lot * rr(0.72, 0.92);
+          const col = rand() < 0.5 ? pick(PAL.glass) : pick(PAL.office);
+          addB(ch, cs, cz, w, d, 0, h, col);
+          if (h > 60 && rand() < 0.5) addB(ch, cs, cz, w * 0.7, d * 0.7, h, h * rr(0.12, 0.3), col);
+        }
+      }
+      continue;
+    }
+    if (type === 'mid') {
+      rect('#a29d95', s, z, BLK, BLK);
+      const lot = BLK / 3;
+      for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) {
+        if (rand() < 0.1) continue;
+        const cs = s + (a - 1) * lot, cz = z + (b - 1) * lot;
+        addB(ch, cs, cz, lot * rr(0.7, 0.93), lot * rr(0.7, 0.93), 0, (3 + Math.floor(rand() * 8)) * 3.5, pick(rand() < 0.7 ? PAL.office : PAL.house));
+      }
+      continue;
+    }
+    // 住宅街
+    rect('#b4a68d', s, z, BLK, BLK);
+    const nl = LOW ? 3 : 4, lot = BLK / nl;
+    for (let a = 0; a < nl; a++) for (let b = 0; b < nl; b++) {
+      const cs = s + (a - (nl - 1) / 2) * lot + rr(-1.5, 1.5), cz = z + (b - (nl - 1) / 2) * lot + rr(-1.5, 1.5);
+      if (rand() < 0.12) addB(ch, cs, cz, lot * rr(0.75, 0.9), lot * rr(0.75, 0.9), 0, rr(9, 15), pick(PAL.house));
+      else addHouse(ch, cs, cz, rr(9, 14), rr(9, 14), rr(5.5, 7), pick(PAL.house), pick(PAL.roof), rr(2.5, 4));
+    }
+  }
+  landmarks.tallest[k] = tallest;
+  landmarks.parks[k] = bigParks.map(p => ({ s: (sCenter(p.i0) + sCenter(p.i1)) / 2, z: (zCenter(p.j0) + zCenter(p.j1)) / 2 }));
+  landmarks.cbd[k] = cbds;
+  stripCanvases[k] = cv;
+}
+
+// ===== ジオメトリ生成ヘルパ =====
+function stripPatch(r, phi, uvFn, withDuv) {
+  const segT = 96, segZ = 48, pos = [], nor = [], uv = [], duv = [], idx = [];
+  for (let iz = 0; iz <= segZ; iz++) {
+    const z = -HL + L * iz / segZ;
+    for (let it = 0; it <= segT; it++) {
+      const s = -STRIP_W / 2 + STRIP_W * it / segT, th = phi + s / R, c = Math.cos(th), sn = Math.sin(th);
+      pos.push(r * c, r * sn, z); nor.push(-c, -sn, 0);
+      uv.push(...uvFn(s, z, it / segT, iz / segZ));
+      if (withDuv) duv.push(s / P, z / P + 0.5);
+    }
+  }
+  for (let iz = 0; iz < segZ; iz++) for (let it = 0; it < segT; it++) {
+    const a = iz * (segT + 1) + it, b = a + 1, c = a + segT + 1, d = c + 1;
+    idx.push(a, c, b, b, c, d); // 内側（軸方向）を表にする
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  if (withDuv) geo.setAttribute('duv', new THREE.Float32BufferAttribute(duv, 2));
+  geo.setIndex(idx);
+  return geo;
+}
+
+class GeoBuilder {
+  constructor() { this.p = []; this.n = []; }
+  quad(a, b, c, d, n) {
+    const cr = new THREE.Vector3().crossVectors(b.clone().sub(a), c.clone().sub(a));
+    const pts = cr.dot(n) >= 0 ? [a, b, c, a, c, d] : [a, c, b, a, d, c];
+    for (const q of pts) { this.p.push(q.x, q.y, q.z); this.n.push(n.x, n.y, n.z); }
+  }
+  // 円筒に沿った帯状の箱（上面 rTop < 下面 rBot）
+  ringBand(rTop, rBot, z0, z1, th0, th1, seg) {
+    const ZN = new THREE.Vector3(0, 0, -1), ZP = new THREE.Vector3(0, 0, 1);
+    for (let i = 0; i < seg; i++) {
+      const ta = th0 + (th1 - th0) * i / seg, tb = th0 + (th1 - th0) * (i + 1) / seg, tm = (ta + tb) / 2;
+      const up = new THREE.Vector3(-Math.cos(tm), -Math.sin(tm), 0), out = up.clone().negate();
+      this.quad(cyl(rTop, ta, z0), cyl(rTop, tb, z0), cyl(rTop, tb, z1), cyl(rTop, ta, z1), up);
+      this.quad(cyl(rBot, ta, z0), cyl(rBot, tb, z0), cyl(rBot, tb, z1), cyl(rBot, ta, z1), out);
+      this.quad(cyl(rTop, ta, z0), cyl(rTop, tb, z0), cyl(rBot, tb, z0), cyl(rBot, ta, z0), ZN);
+      this.quad(cyl(rTop, ta, z1), cyl(rTop, tb, z1), cyl(rBot, tb, z1), cyl(rBot, ta, z1), ZP);
+    }
+  }
+  geo() {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(this.p, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(this.n, 3));
+    return g;
+  }
+}
+
+function instanced(geo, mat, recs, stride, { cast = true, color = true } = {}) {
+  const n = recs.length / stride;
+  if (!n) return null;
+  const m = new THREE.InstancedMesh(geo, mat, n);
+  const col = new THREE.Color();
+  for (let q = 0; q < n; q++) {
+    const o = q * stride;
+    writeBox(m.instanceMatrix.array, q * 16, recs[o], recs[o + 1], recs[o + 2], recs[o + 3], recs[o + 4], recs[o + 5]);
+    if (color) m.setColorAt(q, col.setHex(recs[o + 6]));
+  }
+  m.instanceMatrix.needsUpdate = true;
+  m.computeBoundingSphere();
+  m.castShadow = cast; m.receiveShadow = true;
+  return m;
+}
+
+// ===== シーン構築 =====
+const lodChunks = [];
+const vehicles = { cars: [], trains: [] };
+
+function build() {
+  for (let k = 0; k < 3; k++) genStrip(k);
+
+  // 地面（遠景は街区・屋根・公園を焼き込んだテクスチャでごまかす）
+  for (let k = 0; k < 3; k++) {
+    const tex = new THREE.CanvasTexture(stripCanvases[k]);
+    tex.colorSpace = THREE.SRGBColorSpace; tex.flipY = false; tex.anisotropy = ANISO;
+    const mat = patch(new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 }), { ground: true });
+    const mesh = new THREE.Mesh(stripPatch(R, STRIP_PHI[k], (s, z, u, v) => [u, v], true), mat);
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+  }
+
+  // 建物・屋根・木（チャンク単位で近景/遠景を切替）
+  for (const c of chunks.values()) {
+    const sMid = c.sSum / c.n, zMid = c.zSum / c.n;
+    const near = new THREE.Group(), far = new THREE.Group();
+    const b = instanced(GEO.box, M.bld, c.bld, 7); if (b) near.add(b);
+    const r = instanced(GEO.roof, M.roof, c.roof, 7); if (r) near.add(r);
+    const t = instanced(GEO.tree, M.tree, c.tree, 7); if (t) near.add(t);
+    c.treeLow = t;
+    const f = instanced(GEO.box, M.bld, c.far, 7, { cast: false }); if (f) far.add(f);
+    scene.add(near, far);
+    lodChunks.push({ center: cyl(R, STRIP_PHI[c.k] + sMid / R, zMid), near, far, src: c, detail: null, seed: lodChunks.length + 1 });
+  }
+  scene.add(instanced(GEO.box, M.water, waterRecs, 6, { cast: false, color: false }));
+
+  // 窓ガラス（遠くほど霧で不透明化 = 大気越しの空色）
+  const [gc, gg] = canvas(128, 128);
+  gg.fillStyle = 'rgba(170,205,235,0.07)'; gg.fillRect(0, 0, 128, 128);
+  gg.fillStyle = 'rgba(70,76,86,1)'; gg.fillRect(0, 0, 128, 4); gg.fillRect(0, 0, 4, 128);
+  const glassTex = new THREE.CanvasTexture(gc);
+  glassTex.wrapS = glassTex.wrapT = THREE.RepeatWrapping; glassTex.anisotropy = ANISO; glassTex.colorSpace = THREE.SRGBColorSpace;
+  const glassMat = new THREE.MeshBasicMaterial({ map: glassTex, transparent: true, depthWrite: false, side: THREE.DoubleSide });
+  glassMat.onBeforeCompile = sh => {
+    sh.uniforms.uEnv = U.uEnv;
+    sh.vertexShader = 'varying vec3 vGW; varying vec3 vGN;\n' + sh.vertexShader.replace('#include <project_vertex>',
+      '#include <project_vertex>\n vGW = (modelMatrix * vec4(transformed, 1.0)).xyz; vGN = normalize(mat3(modelMatrix) * normal);');
+    sh.fragmentShader = 'varying vec3 vGW; varying vec3 vGN; uniform samplerCube uEnv;\n' + sh.fragmentShader.replace('#include <opaque_fragment>', `{
+        vec3 V = normalize(vGW - cameraPosition), N = normalize(vGN);
+        if (dot(N, V) > 0.0) N = -N;
+        float fr = clamp(0.06 + 0.94 * pow(1.0 - abs(dot(N, V)), 5.0), 0.0, 1.0);
+        outgoingLight = mix(outgoingLight, textureCube(uEnv, reflect(V, N)).rgb, fr);
+        diffuseColor.a = max(diffuseColor.a, fr);
+      }
+      #include <opaque_fragment>`);
+    sh.fragmentShader = sh.fragmentShader.replace('#include <fog_fragment>',
+      '#include <fog_fragment>\n#ifdef USE_FOG\n gl_FragColor.a = max(gl_FragColor.a, fogFactor * 0.97);\n#endif');
+  };
+  for (const psi of WIN_PHI) { const gm = new THREE.Mesh(stripPatch(GLASS_R, psi, (s, z) => [s / 45, z / 45], false), glassMat); glassMeshes.push(gm); scene.add(gm); }
+
+  // 構造物: 陸地の縁の壁・橋・環状高架・軸方向高架・柱
+  const conc = new GeoBuilder(), deck = new GeoBuilder();
+  const misc = [];
+  for (let k = 0; k < 3; k++) {
+    const phi = STRIP_PHI[k];
+    for (const sg of [-1, 1]) {
+      const te = phi + sg * SECTOR / 2, n = new THREE.Vector3(-Math.sin(te), Math.cos(te), 0).multiplyScalar(sg);
+      conc.quad(cyl(R, te, -HL), cyl(R, te, HL), cyl(GLASS_R, te, HL), cyl(GLASS_R, te, -HL), n);
+      misc.push(te - sg * 0.4 / R, 0, 0, 0.4, 1.1, L); // 手すり
+    }
+    misc.push(phi, 0, 6.5, 8, 1.5, L); // 軸方向の高架鉄道
+    for (let z = -HL + 40; z < HL; z += 50) misc.push(phi, z, 0, 1.6, 6.5, 1.6);
+  }
+  for (const zb of BRIDGE_Z) {
+    conc.ringBand(R - 16, R - 14.5, zb - 4.5, zb + 4.5, 0, TAU, 360); // 環状高架鉄道
+    for (let a = 0; a < TAU; a += 60 / R) {
+      if (isLand(a) && Math.abs(angDiff(a, STRIP_PHI[stripOf(a)])) * R < 8) continue;
+      misc.push(a, zb, 0, 1.8, 14.5, 1.8);
+    }
+    for (const psi of WIN_PHI) {
+      const t0 = psi - SECTOR / 2 - 0.003, t1 = psi + SECTOR / 2 + 0.003;
+      deck.ringBand(R, R + 2.5, zb - 10, zb + 10, t0, t1, 64);   // 窓をまたぐ橋（道路）
+      conc.ringBand(R - 0.03, R, zb - 0.15, zb + 0.15, t0, t1, 64); // センターライン
+      conc.ringBand(R - 1.1, R, zb - 10, zb - 9.6, t0, t1, 64);
+      conc.ringBand(R - 1.1, R, zb + 9.6, zb + 10, t0, t1, 64);
+      for (let a = psi - SECTOR / 2 + 0.02; a < psi + SECTOR / 2; a += 130 / R)
+        for (const dz of [-8, 8]) misc.push(a, zb + dz, -(GLASS_R - R), 1.2, GLASS_R - R - 2.5, 1.2);
+    }
+  }
+  const concMesh = new THREE.Mesh(conc.geo(), M.concrete); concMesh.receiveShadow = concMesh.castShadow = true;
+  const deckMesh = new THREE.Mesh(deck.geo(), M.deck); deckMesh.receiveShadow = deckMesh.castShadow = true;
+  scene.add(concMesh, deckMesh, instanced(GEO.box, M.concrete, misc, 6, { color: false }));
+
+  // 街灯: 川の両岸（30mおき）と橋の両側の歩道（40mおき）。支柱・灯具・足元の光だまり
+  const lampAt = [];
+  for (let k = 0; k < 3; k++) for (const side of [-1, 1]) {
+    const th = STRIP_PHI[k] + (sCenter(RIVER_I[k]) + side * 49) / R;
+    for (let z = -HL + 60; z < HL - 60; z += 30) lampAt.push([th, z]);
+  }
+  for (const zb of BRIDGE_Z) for (const psi of WIN_PHI) for (const dz of [-9.2, 9.2])
+    for (let a = psi - SECTOR / 2 + 20 / R; a < psi + SECTOR / 2; a += 40 / R) lampAt.push([a, zb + dz]);
+  const postR = [], headR = [], poolR = [];
+  for (const [th, z] of lampAt) { postR.push(th, z, 0, 0.25, 7, 0.25); headR.push(th, z, 7, 0.9, 0.25, 0.55); poolR.push(th, z, -0.06, 16, 1, 16); }
+  scene.add(instanced(GEO.box, M.steel, postR, 6, { color: false, cast: false }));
+  lampHeadMat = new THREE.MeshBasicMaterial({ color: 0x9a9a9a });
+  scene.add(instanced(GEO.box, lampHeadMat, headR, 6, { color: false, cast: false }));
+  lampPoolMat = new THREE.MeshBasicMaterial({
+    map: gradientSprite([[0, 'rgba(255,214,150,1)'], [0.35, 'rgba(255,190,120,0.45)'], [1, 'rgba(255,170,100,0)']]),
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0, polygonOffset: true, polygonOffsetFactor: -2,
+  });
+  lampPools = instanced(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), lampPoolMat, poolR, 6, { color: false, cast: false });
+  lampPools.visible = false; lampPools.renderOrder = 2;
+  scene.add(lampPools);
+
+  // 両端のキャップ（陸地は段々の丘、窓部分は暗いガラス）
+  const capR = GLASS_R + 5;
+  for (const zc of [-HL, HL]) {
+    const mirror = zc > 0;
+    const [cc, cg] = canvas(1024, 1024);
+    const P2 = (a, r) => { const aa = mirror ? Math.PI - a : a; return [512 + r * 512 * Math.cos(aa), 512 - r * 512 * Math.sin(aa)]; };
+    const wedge = (a0, a1, r0, r1, col) => {
+      cg.fillStyle = col; cg.beginPath();
+      for (let n = 0; n <= 24; n++) cg.lineTo(...P2(a0 + (a1 - a0) * n / 24, r1));
+      for (let n = 24; n >= 0; n--) cg.lineTo(...P2(a0 + (a1 - a0) * n / 24, r0));
+      cg.closePath(); cg.fill();
+    };
+    cg.fillStyle = '#6f757e'; cg.fillRect(0, 0, 1024, 1024);
+    for (let k = 0; k < 3; k++) {
+      const a0 = STRIP_PHI[k] - SECTOR / 2, a1 = STRIP_PHI[k] + SECTOR / 2;
+      for (let r = R / capR, n = 0; r > 0.5; r -= 0.035, n++) wedge(a0, a1, r - 0.035, r, n % 2 ? '#6d8a52' : '#7d9a5d');
+      wedge(WIN_PHI[k] - SECTOR / 2, WIN_PHI[k] + SECTOR / 2, 0.5, 1, '#122036');
+      for (let n = 1; n < 6; n++) { const a = WIN_PHI[k] - SECTOR / 2 + SECTOR * n / 6; wedge(a - 0.004, a + 0.004, 0.5, 1, '#3a414c'); }
+    }
+    for (let n = 0; n < 12; n++) wedge(n * TAU / 12 - 0.01, n * TAU / 12 + 0.01, 0.05, 0.5, '#565c64');
+    wedge(0, TAU, 0, 0.05, '#2b2f35');
+    const tex = new THREE.CanvasTexture(cc); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = ANISO;
+    const geo = new THREE.CircleGeometry(capR, 120);
+    if (mirror) geo.rotateY(Math.PI);
+    geo.translate(0, 0, zc);
+    scene.add(new THREE.Mesh(geo, patch(new THREE.MeshStandardMaterial({ map: tex, roughness: 1 }))));
+  }
+
+  // 中心軸の構造物
+  const spine = new THREE.Mesh(new THREE.CylinderGeometry(14, 14, L, 16, 1, true).rotateX(Math.PI / 2), M.steel);
+  scene.add(spine);
+  const ringRecs = [];
+  for (let z = -HL + 500; z < HL; z += 1000) for (let a = 0; a < TAU; a += TAU / 8) ringRecs.push(a, z, R - 30, 8, 16, 6);
+  for (let n = 0; n < 4; n++) ringRecs.push(AXIS_TRACK_A0 + n * TAU / 4, 0, R - 52, 5, 1.5, L - 300); // 軸電車のレール
+  scene.add(instanced(GEO.box, M.steel, ringRecs, 6, { cast: false, color: false }));
+
+  // 雲: 柔らかい玉（常にカメラを向くビルボード）を十数個ずつ固めた積雲。上面は明るく底は影色
+  clouds = buildClouds();
+  scene.add(clouds.mesh);
+
+  // ===== 宇宙側: 星・外側ミラー・反射した太陽 =====
+  const nStar = LOW ? 3000 : 7000, sp = new Float32Array(nStar * 3), sc = new Float32Array(nStar * 3), v = new THREE.Vector3();
+  for (let n = 0; n < nStar; n++) {
+    v.randomDirection().multiplyScalar(60000); sp.set([v.x, v.y, v.z], n * 3);
+    const b = 0.35 + 0.65 * rand() ** 3, tint = rand();
+    sc.set([b * (0.85 + 0.15 * tint), b * 0.92, b * (1.05 - 0.15 * tint)], n * 3);
+  }
+  const sg = new THREE.BufferGeometry();
+  sg.setAttribute('position', new THREE.BufferAttribute(sp, 3)); sg.setAttribute('color', new THREE.BufferAttribute(sc, 3));
+  stars = new THREE.Points(sg, new THREE.PointsMaterial({ size: 1.6, sizeAttenuation: false, vertexColors: true, fog: false }));
+  stars.renderOrder = -1; stars.frustumCulled = false;
+  scene.add(stars);
+
+  const [mc, mg] = canvas(128, 1024);
+  const mgr = mg.createLinearGradient(0, 0, 0, 1024);
+  mgr.addColorStop(0, '#0b1222'); mgr.addColorStop(0.7, '#1b2742'); mgr.addColorStop(1, '#55617a');
+  mg.fillStyle = mgr; mg.fillRect(0, 0, 128, 1024);
+  mg.fillStyle = 'rgba(120,135,160,0.25)';
+  for (let y = 0; y < 1024; y += 32) mg.fillRect(0, y, 128, 2);
+  for (let x = 0; x < 128; x += 32) mg.fillRect(x, 0, 2, 1024);
+  mg.fillStyle = '#8a929e'; mg.fillRect(0, 0, 3, 1024); mg.fillRect(125, 0, 3, 1024);
+  const mirrorTex = new THREE.CanvasTexture(mc); mirrorTex.colorSpace = THREE.SRGBColorSpace;
+  const mirrorMat = new THREE.MeshBasicMaterial({ map: mirrorTex, side: THREE.DoubleSide, fog: false, depthWrite: false });
+  for (const psi of WIN_PHI) {
+    const out = new THREE.Vector3(Math.cos(psi), Math.sin(psi), 0), east = new THREE.Vector3(-Math.sin(psi), Math.cos(psi), 0);
+    const hw = (GLASS_R + 60) * Math.sin(SECTOR / 2) * 1.04;
+    const H = out.clone().multiplyScalar(GLASS_R + 60).add(new THREE.Vector3(0, 0, -HL));
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(12), 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2));
+    geo.setIndex([0, 1, 2, 0, 2, 3]);
+    const mesh = new THREE.Mesh(geo, mirrorMat); mesh.frustumCulled = false;
+    scene.add(mesh);
+    mirrors.push({ geo, out, east, hw, H });
+  }
+  mirrors.mat = mirrorMat;
+  setMirrorAngle(22);
+  glare = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: gradientSprite([[0, 'rgba(255,255,255,1)'], [0.04, 'rgba(255,250,235,1)'], [0.09, 'rgba(255,235,200,0.5)'], [0.3, 'rgba(255,215,170,0.12)'], [1, 'rgba(255,200,150,0)']]),
+    blending: THREE.AdditiveBlending, depthWrite: false, fog: false, transparent: true, color: new THREE.Color(3, 3, 3),
+  }));
+  glare.scale.setScalar(26000); glare.renderOrder = 2;
+  scene.add(glare);
+
+  buildShips();
+  buildAxisTrains();
+  buildLocalLife();
+  buildBirds();
+
+  // ===== 車と電車 =====
+  const carRecs = [];
+  for (let k = 0; k < 3; k++) for (let m = -12; m <= 12; m += 4) for (const dir of [-1, 1]) {
+    const n = LOW ? 50 : 100, speed = rr(11, 16), th = STRIP_PHI[k] + (m * P + dir * 3.5) / R;
+    for (let q = 0; q < n; q++) vehicles.cars.push({ ring: false, lane: th, ph: (q + rand() * 0.6) / n * (L - 100), v: speed * dir });
+  }
+  for (const zb of BRIDGE_Z) for (const dir of [-1, 1]) {
+    const n = LOW ? 50 : 100, speed = rr(12, 17) / R;
+    for (let q = 0; q < n; q++) vehicles.cars.push({ ring: true, lane: zb + dir * 3.5, ph: (q + rand() * 0.6) / n * TAU, v: speed * dir });
+  }
+  for (const c of vehicles.cars) carRecs.push(0, 0, 0, 1, 1, 1, pick(PAL.car));
+  carMesh = instanced(GEO.box, M.car, carRecs, 7);
+  carMesh.frustumCulled = false;
+  // 夜の光の流れ: 遠くの車ごとに前（白）と後ろ（赤）の光の点。画面上で一定サイズなので遠くでも筋に見える
+  {
+    const n = vehicles.cars.length * 2;
+    const g = new THREE.BufferGeometry();
+    const pos = new Float32Array(n * 3), col = new Float32Array(n * 3), on = new Float32Array(n);
+    for (let i = 0; i < n; i += 2) { col.set([1.0, 0.9, 0.7], i * 3); col.set([1.0, 0.1, 0.04], i * 3 + 3); }
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    g.setAttribute('aOn', new THREE.BufferAttribute(on, 1).setUsage(THREE.DynamicDrawUsage));
+    const m = new THREE.ShaderMaterial({
+      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uNight: { value: 0 }, uSize: { value: 2.6 * renderer.getPixelRatio() } }]),
+      vertexShader: `
+        #include <common>
+        #include <fog_pars_vertex>
+        #include <logdepthbuf_pars_vertex>
+        attribute vec3 color; attribute float aOn; uniform float uSize; varying vec3 vCol;
+        void main() {
+          vCol = color;
+          vec4 mvPosition = viewMatrix * vec4(position, 1.0);
+          gl_Position = projectionMatrix * mvPosition;
+          gl_PointSize = uSize * aOn;
+          #include <logdepthbuf_vertex>
+          #include <fog_vertex>
+        }`,
+      fragmentShader: `
+        #include <common>
+        #include <fog_pars_fragment>
+        #include <logdepthbuf_pars_fragment>
+        uniform float uNight; varying vec3 vCol;
+        void main() {
+          #include <logdepthbuf_fragment>
+          float a = smoothstep(0.5, 0.1, length(gl_PointCoord - 0.5)) * uNight;
+          if (a < 0.01) discard;
+          gl_FragColor = vec4(vCol * 3.0, a);
+          #include <fog_fragment>
+        }`,
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: true,
+    });
+    carLights = new THREE.Points(g, m);
+    carLights.frustumCulled = false; carLights.renderOrder = 3;
+    scene.add(carLights);
+  }
+  scene.add(carMesh);
+  for (const zb of BRIDGE_Z) for (const dir of [-1, 1]) { const o = rand(); for (let n = 0; n < 5; n++) vehicles.trains.push({ ring: true, lane: zb + dir * 2, ph: (n + o) / 5 * TAU, v: 30 / (R - 16) * dir }); }
+  for (let k = 0; k < 3; k++) for (const dir of [-1, 1]) { const o = rand(); for (let n = 0; n < 4; n++) vehicles.trains.push({ ring: false, lane: STRIP_PHI[k] + dir * 2 / R, ph: (n + o) / 4 * (L - 400), v: 28 * dir }); }
+  const trRecs = [];
+  for (let n = 0; n < vehicles.trains.length * 8; n++) trRecs.push(0, 0, 0, 1, 1, 1, n % 8 === 0 ? 0xdfe6ee : 0xf4f6f8);
+  trainMesh = instanced(GEO.box, M.bld, trRecs, 7);
+  trainMesh.frustumCulled = false;
+  scene.add(trainMesh);
+}
+let stars, glare, carMesh, trainMesh, clouds, carLights, lampHeadMat, lampPoolMat, lampPools;
+
+// 外側ミラー: 端（z=-HL）のヒンジまわりに開閉する。開くと太陽光が入り昼、窓に閉じると夜
+const mirrors = [];
+function setMirrorAngle(deg) {
+  const al = deg * Math.PI / 180;
+  for (const m of mirrors) {
+    const D = new THREE.Vector3(0, 0, Math.cos(al)).addScaledVector(m.out, Math.sin(al)).multiplyScalar(L);
+    const a = m.H.clone().addScaledVector(m.east, -m.hw), b = m.H.clone().addScaledVector(m.east, m.hw);
+    const c = b.clone().add(D), d = a.clone().add(D);
+    m.geo.attributes.position.array.set([...a.toArray(), ...b.toArray(), ...c.toArray(), ...d.toArray()]);
+    m.geo.attributes.position.needsUpdate = true;
+  }
+}
+
+// ===== 昼と夜（N キー）=====
+const DAY = {
+  sky: new THREE.Color(0.40, 0.48, 0.60), gnd: new THREE.Color(0.20, 0.19, 0.17), fog: new THREE.Color(0xbcd0e8), fogD: 3.3e-4,
+  cloudLit: new THREE.Color(1.25, 1.22, 1.15), cloudSh: new THREE.Color(0.48, 0.54, 0.66),
+};
+const NIGHT = {
+  sky: new THREE.Color(0.012, 0.016, 0.03), gnd: new THREE.Color(0.03, 0.02, 0.012), fog: new THREE.Color(0x0a0f1c), fogD: 2.0e-4,
+  cloudLit: new THREE.Color(0.02, 0.024, 0.034), cloudSh: new THREE.Color(0.045, 0.032, 0.024),   // 夜の雲は街明かりで下から照らされる
+};
+const dayNight = { n: 0, target: 0, lastEnv: 0 };
+function updateDayNight(dt) {
+  if (dayNight.n === dayNight.target && dayNight.applied) return;
+  dayNight.n = THREE.MathUtils.clamp(dayNight.n + Math.sign(dayNight.target - dayNight.n) * dt / 8, 0, 1);
+  if (Math.abs(dayNight.n - dayNight.target) < 1e-3) dayNight.n = dayNight.target;
+  const n = dayNight.n, e = THREE.MathUtils.smoothstep(n, 0, 1);
+  U.uNight.value = e;
+  sun.intensity = 3.3 * (1 - e);
+  U.uSkyAmb.value.lerpColors(DAY.sky, NIGHT.sky, e);
+  U.uGndAmb.value.lerpColors(DAY.gnd, NIGHT.gnd, e);
+  scene.fog.color.lerpColors(DAY.fog, NIGHT.fog, e);
+  scene.fog.density = THREE.MathUtils.lerp(DAY.fogD, NIGHT.fogD, e);
+  const cu = clouds.mesh.material.uniforms;
+  cu.uLit.value.lerpColors(DAY.cloudLit, NIGHT.cloudLit, e); cu.uShadow.value.lerpColors(DAY.cloudSh, NIGHT.cloudSh, e);
+  glare.material.opacity = 1 - e;
+  setMirrorAngle(THREE.MathUtils.lerp(22, 0.4, e));
+  mirrors.mat.color.setScalar(THREE.MathUtils.lerp(1, 0.04, e));
+  if (glassMeshes[0]) glassMeshes[0].material.color.setScalar(THREE.MathUtils.lerp(1, 0.03, e)); // ガラスは光を受けない素材なので手動で暗くする
+  lampHeadMat.color.setRGB(0.6 + 7.4 * e, 0.6 + 5.0 * e, 0.6 + 2.6 * e);   // 夜は灯具が光る（ブルームでにじむ）
+  lampPoolMat.opacity = 0.55 * e; lampPools.visible = e > 0.01;
+  if (post.bloom) { post.bloom.strength = THREE.MathUtils.lerp(0.4, 0.6, e); post.bloom.threshold = THREE.MathUtils.lerp(1.15, 0.85, e); }
+  renderer.toneMappingExposure = THREE.MathUtils.lerp(1.05, 1.15, e);
+  if (Math.abs(n - dayNight.lastEnv) > 0.04 || n === dayNight.target) { envTimer = 99; dayNight.lastEnv = n; } // 反射も追従
+  dayNight.applied = true;
+}
+const toggleNight = () => { dayNight.target = dayNight.target ? 0 : 1; dayNight.applied = false; };
+
+// 近くの車用の形（前方 +z、地面 y=0、メートル単位）。インスタンス色が車体色になる
+const vcol = (g, c) => { const n = g.attributes.position.count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) a.set(c, i * 3); g.setAttribute('color', new THREE.BufferAttribute(a, 3)); return g.index ? g.toNonIndexed() : g; };
+// 近景の木: 幹＋枝＋葉の塊7つ（上ほど明るく下ほど暗い）
+GEO.treeBroad = (() => {
+  const r = mulberry32(42), parts = [vcol(new THREE.CylinderGeometry(0.035, 0.06, 0.55, 6).translate(0, 0.275, 0), [0.5, 0.38, 0.27])];
+  for (const sx of [-1, 1]) parts.push(vcol(new THREE.CylinderGeometry(0.015, 0.025, 0.28, 5).translate(0, 0.14, 0).rotateZ(sx * 0.7).translate(0, 0.4, 0), [0.5, 0.38, 0.27]));
+  for (let i = 0; i < 7; i++) {
+    const y = 0.5 + r() * 0.35, a = r() * TAU, d = i === 0 ? 0 : 0.12 + r() * 0.12, sz = 0.17 + r() * 0.12;
+    const b = 0.72 + (y - 0.5) * 1.3;
+    parts.push(vcol(new THREE.IcosahedronGeometry(sz, 0).rotateY(r() * 3).translate(Math.cos(a) * d, y, Math.sin(a) * d), [b, b, b]));
+  }
+  return mergeGeometries(parts);
+})();
+GEO.treeConifer = (() => {
+  const parts = [vcol(new THREE.CylinderGeometry(0.03, 0.05, 0.3, 6).translate(0, 0.15, 0), [0.45, 0.33, 0.24])];
+  [[0.36, 0.42, 0.18, 0.62], [0.28, 0.36, 0.42, 0.78], [0.19, 0.3, 0.64, 0.95]].forEach(([rad, h, y, b]) =>
+    parts.push(vcol(new THREE.ConeGeometry(rad, h, 8).translate(0, y + h / 2, 0), [b * 0.75, b * 0.9, b * 0.8])));
+  return mergeGeometries(parts);
+})();
+// バス（全長11m）とトラック（全長8.6m）
+GEO.bus = (() => {
+  const p = [];
+  p.push(vcol(new THREE.BoxGeometry(2.5, 2.9, 11).translate(0, 1.8, 0), [1, 1, 1]));
+  p.push(vcol(new THREE.BoxGeometry(2.54, 1.0, 9.4).translate(0, 2.45, -0.4), [0.1, 0.12, 0.15]));
+  p.push(vcol(new THREE.BoxGeometry(2.3, 1.5, 0.06).translate(0, 2.2, 5.5), [0.1, 0.12, 0.15]));
+  for (const x of [-1.15, 1.15]) for (const z of [-3.6, 3.6]) p.push(vcol(new THREE.BoxGeometry(0.32, 0.95, 0.95).translate(x, 0.47, z), [0.04, 0.04, 0.04]));
+  for (const x of [-0.85, 0.85]) { p.push(vcol(new THREE.BoxGeometry(0.4, 0.18, 0.06).translate(x, 0.75, 5.52), [3, 3, 2.6])); p.push(vcol(new THREE.BoxGeometry(0.3, 0.3, 0.06).translate(x, 0.9, -5.52), [3, 0.15, 0.1])); }
+  return mergeGeometries(p);
+})();
+GEO.truck = (() => {
+  const p = [];
+  p.push(vcol(new THREE.BoxGeometry(2.2, 0.45, 8.4).translate(0, 0.6, 0), [0.08, 0.08, 0.09]));
+  p.push(vcol(new THREE.BoxGeometry(2.4, 2.4, 2.1).translate(0, 2.0, 3.1), [1, 1, 1]));
+  p.push(vcol(new THREE.BoxGeometry(2.2, 0.9, 0.06).translate(0, 2.5, 4.16), [0.1, 0.12, 0.15]));
+  p.push(vcol(new THREE.BoxGeometry(2.5, 2.9, 6.0).translate(0, 2.27, -1.2), [0.93, 0.93, 0.92]));
+  for (const x of [-1.08, 1.08]) for (const z of [-3.2, -2.1, 3.0]) p.push(vcol(new THREE.BoxGeometry(0.3, 0.9, 0.9).translate(x, 0.45, z), [0.04, 0.04, 0.04]));
+  for (const x of [-0.8, 0.8]) { p.push(vcol(new THREE.BoxGeometry(0.35, 0.16, 0.06).translate(x, 1.0, 4.17), [3, 3, 2.6])); p.push(vcol(new THREE.BoxGeometry(0.3, 0.2, 0.06).translate(x, 0.9, -4.22), [3, 0.15, 0.1])); }
+  return mergeGeometries(p);
+})();
+GEO.car = (() => {
+  const parts = [];
+  const add = (g, c) => { const n = g.attributes.position.count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) a.set(c, i * 3); g.setAttribute('color', new THREE.BufferAttribute(a, 3)); parts.push(g); };
+  add(new THREE.BoxGeometry(1.8, 0.7, 4.4).translate(0, 0.65, 0), [1, 1, 1]);                   // 車体
+  const cab = new THREE.BoxGeometry(1.62, 0.58, 2.4);
+  const pa = cab.attributes.position;
+  for (let i = 0; i < pa.count; i++) if (pa.getY(i) > 0) { pa.setX(i, pa.getX(i) * 0.86); pa.setZ(i, pa.getZ(i) * 0.7 - 0.15); }
+  cab.computeVertexNormals();
+  add(cab.translate(0, 1.29, -0.2), [0.12, 0.14, 0.17]);                                        // キャビン（ガラス）
+  add(new THREE.BoxGeometry(1.36, 0.05, 1.6).translate(0, 1.6, -0.3), [1, 1, 1]);                // 屋根
+  for (const x of [-0.82, 0.82]) for (const z of [-1.4, 1.4]) add(new THREE.BoxGeometry(0.3, 0.64, 0.64).translate(x, 0.32, z), [0.04, 0.04, 0.04]);
+  for (const x of [-0.6, 0.6]) { add(new THREE.BoxGeometry(0.4, 0.14, 0.06).translate(x, 0.82, 2.2), [3, 3, 2.6]); add(new THREE.BoxGeometry(0.4, 0.14, 0.06).translate(x, 0.82, -2.2), [3, 0.15, 0.1]); }
+  return mergeGeometries(parts.map(g => g.index ? g.toNonIndexed() : g));
+})();
+// 進行方向つきで置く（fwdEast: 周方向に走るか、dir: ±1）
+function writeCar(a, o, th, z, fwdEast, dir) {
+  const c = Math.cos(th), s = Math.sin(th), r = R;
+  let xx, xy, xz, zx, zy, zz;
+  if (fwdEast) { zx = -s * dir; zy = c * dir; zz = 0; xx = 0; xy = 0; xz = -dir; }   // 前=東、右=-北
+  else { zx = 0; zy = 0; zz = dir; xx = -s * dir; xy = c * dir; xz = 0; }             // 前=北、右=東
+  a[o] = xx; a[o + 1] = xy; a[o + 2] = xz; a[o + 3] = 0;
+  a[o + 4] = -c; a[o + 5] = -s; a[o + 6] = 0; a[o + 7] = 0;
+  a[o + 8] = zx; a[o + 9] = zy; a[o + 10] = zz; a[o + 11] = 0;
+  a[o + 12] = r * c; a[o + 13] = r * s; a[o + 14] = z; a[o + 15] = 1;
+}
+
+// ===== 中心軸の高速電車（船よりずっと速い） =====
+const AXIS_TRACK_A0 = TAU / 16;          // 軸の補強リングの腕と重ならない角度
+const axisTrains = [];
+let axisCarMesh, axisStripeMesh;
+function buildAxisTrains() {
+  const CARS = 8, N_PER_TRACK = 2;
+  for (let tr = 0; tr < 4; tr++) for (let n = 0; n < N_PER_TRACK; n++)
+    axisTrains.push({ a: AXIS_TRACK_A0 + tr * TAU / 4, dir: tr % 2 ? -1 : 1, ph: (n + rand() * 0.3) / N_PER_TRACK, v: rr(260, 320) });
+  const cols = [0xf4f5f7, 0xe8463a, 0x23a6d9, 0xf2c230];
+  const recs = [];
+  axisTrains.forEach((t, i) => { for (let c = 0; c < CARS; c++) recs.push(0, 0, 0, 1, 1, 1, cols[i % cols.length]); });
+  axisCarMesh = instanced(GEO.box, M.bld, recs, 7, { cast: false });
+  axisCarMesh.frustumCulled = false;
+  axisStripeMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1.04, 0.16, 0.98).translate(0, 0.3, 0), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.2, 6, 9) }), axisCarMesh.count);
+  axisStripeMesh.instanceMatrix = axisCarMesh.instanceMatrix; // 車体と同じ行列を共有
+  axisStripeMesh.frustumCulled = false;
+  scene.add(axisCarMesh, axisStripeMesh);
+}
+function updateAxisTrains(t) {
+  const a = axisCarMesh.instanceMatrix.array, span = 2 * (HL - 150);
+  axisTrains.forEach((tr, i) => {
+    for (let c = 0; c < 8; c++) {
+      const z = -(HL - 150) + ((((tr.ph * span + tr.v * tr.dir * t - tr.dir * c * 42) % span) + span) % span);
+      writeBox(a, (i * 8 + c) * 16, tr.a, z, R - 50.5, 10, 8, 40); // レールの上（軸から約50m）
+    }
+  });
+  axisCarMesh.instanceMatrix.needsUpdate = true;
+}
+
+// ===== カメラ周辺だけの車と歩行者（ビルが密な街区ほど多い） =====
+function typeAt(th, z) {
+  if (!isLand(th)) return null;
+  const k = stripOf(th), s = angDiff(th, STRIP_PHI[k]) * R;
+  const i = Math.round(s / P + (NS - 1) / 2), j = Math.round(z / P + (NZ - 1) / 2);
+  if (i < 0 || i >= NS || j < 0 || j >= NZ) return null;
+  return blockTypes[k][i * NZ + j];
+}
+const CAR_D = { down: 1, mid: 0.55, res: 0.2, park: 0.1, river: 0.08 };
+const PED_D = { down: 1, mid: 0.45, res: 0.12, park: 0.3, river: 0.05 };
+const local = { cars: [], peds: [] };
+const LC = { n: LOW ? 250 : 600, r: 700 }, LP = { n: LOW ? 600 : 1600, r: 320 };
+let localCarMeshes, pedBodyMesh, pedSkinMesh;
+
+// ===== 鳥の群れ（カメラ周辺。群れの中心が旋回し、各個体は少しずつずれて飛ぶ） =====
+const flocks = [];
+let birdMesh;
+function buildBirds() {
+  const g = new THREE.BufferGeometry();
+  // 前方 +z。胴体の三角形と左右の翼（翼端ほど大きく羽ばたく）
+  g.setAttribute('position', new THREE.Float32BufferAttribute([
+    0, 0, 0.35, -0.08, 0, -0.3, 0.08, 0, -0.3,
+    0, 0, 0.12, -0.45, 0, -0.05, 0, 0, -0.15,
+    0, 0, 0.12, 0, 0, -0.15, 0.45, 0, -0.05,
+  ], 3));
+  g.computeVertexNormals();
+  const mat = new THREE.MeshBasicMaterial({ color: 0x7d8590, side: THREE.DoubleSide });
+  mat.onBeforeCompile = sh => {
+    sh.uniforms.uTime = U.uTime;
+    sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+      transformed.y += sin(uTime * 13.0 + instanceMatrix[3].x * 0.37 + instanceMatrix[3].z * 0.21) * abs(position.x) * 0.9;`);
+  };
+  const nF = LOW ? 4 : 7, per = 18;
+  birdMesh = new THREE.InstancedMesh(g, mat, nF * per);
+  birdMesh.frustumCulled = false;
+  for (let f = 0; f < nF; f++) {
+    flocks.push({ on: false, birds: Array.from({ length: per }, () => ({ o: [rr(-1, 1), rr(-1, 1), rr(-1, 1)], ph: rand() * TAU, prev: new THREE.Vector3() })) });
+  }
+  scene.add(birdMesh);
+}
+const _bf = new THREE.Vector3(), _bu = new THREE.Vector3(), _br = new THREE.Vector3(), _bp = new THREE.Vector3(), _bm = new THREE.Matrix4();
+function updateBirds(dt, t) {
+  let idx = 0;
+  for (const f of flocks) {
+    if (!f.on || Math.hypot(angDiff(f.th, player.th) * R, f.z - player.z) > 700 || player.h > 400 || U.uNight.value > 0.3) {
+      if (player.h > 400 || U.uNight.value > 0.3) { f.on = false; } // 上空と夜は鳥なし
+      else {
+        const a = rand() * TAU, d = rr(40, 260);
+        Object.assign(f, { on: true, th: player.th + Math.cos(a) * d / R, z: player.z + Math.sin(a) * d, h: rr(25, 90), rad: rr(30, 80), w: rr(0.12, 0.25) * (rand() < 0.5 ? 1 : -1), a0: rand() * TAU });
+      }
+    }
+    for (const b of f.birds) {
+      if (!f.on) { _bm.makeScale(0, 0, 0); birdMesh.setMatrixAt(idx++, _bm); continue; }
+      const ang = f.a0 + t * f.w + b.o[0] * 0.5;
+      const s = Math.cos(ang) * f.rad + b.o[1] * 12 + Math.sin(t * 0.9 + b.ph) * 3;
+      const zz = f.z + Math.sin(ang) * f.rad + b.o[2] * 12 + Math.cos(t * 0.7 + b.ph) * 3;
+      const hh = f.h + b.o[0] * 6 + Math.sin(t * 0.5 + b.ph) * 2;
+      const th = f.th + s / R;
+      _bp.set((R - hh) * Math.cos(th), (R - hh) * Math.sin(th), zz);
+      _bf.subVectors(_bp, b.prev); if (_bf.lengthSq() < 1e-6) _bf.set(0, 0, 1); _bf.normalize();
+      _bu.set(-Math.cos(th), -Math.sin(th), 0);
+      _br.crossVectors(_bu, _bf).normalize(); _bu.crossVectors(_bf, _br);
+      _bm.makeBasis(_br, _bu, _bf).scale(new THREE.Vector3(2.6, 2.6, 2.6)).setPosition(_bp);
+      birdMesh.setMatrixAt(idx++, _bm);
+      b.prev.copy(_bp);
+    }
+  }
+  birdMesh.instanceMatrix.needsUpdate = true;
+}
+
+// ===== 環境音（音声ファイルなし。WebAudio で合成）=====
+// 街のざわめき（低域ノイズ）・風（帯域ノイズ）・鳥の声（短い音程スイープ）・軸付近のうなり（低いサイン波）を場所に応じて混ぜる
+const audio = { ctx: null, muted: false };
+function startAudio() {
+  if (audio.ctx) { if (audio.ctx.state === 'suspended') audio.ctx.resume(); return; }
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const len = ctx.sampleRate * 4, buf = ctx.createBuffer(2, len, ctx.sampleRate);
+  for (let ch = 0; ch < 2; ch++) { const d = buf.getChannelData(ch); let last = 0; for (let i = 0; i < len; i++) { last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02; d[i] = last * 3.5; } }
+  const noise = () => { const s = ctx.createBufferSource(); s.buffer = buf; s.loop = true; s.start(0, Math.random() * 3); return s; };
+  const master = ctx.createGain(); master.gain.value = 0.8; master.connect(ctx.destination);
+  const city = ctx.createGain(); city.gain.value = 0;
+  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 420;
+  noise().connect(lp); lp.connect(city); city.connect(master);
+  const wind = ctx.createGain(); wind.gain.value = 0;
+  const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 500; bp.Q.value = 0.6;
+  noise().connect(bp); bp.connect(wind); wind.connect(master);
+  const hum = ctx.createGain(); hum.gain.value = 0;
+  for (const fq of [55, 82.5]) { const o = ctx.createOscillator(); o.frequency.value = fq; o.connect(hum); o.start(); }
+  hum.connect(master);
+  Object.assign(audio, { ctx, master, city, wind, bp, hum, birdBus: master });
+  el('s-snd').textContent = 'ON（M でミュート）';
+}
+function chirp(ctx, when, pan) {
+  const o = ctx.createOscillator(), g = ctx.createGain(), p = ctx.createStereoPanner();
+  const f0 = rr(2200, 3800);
+  o.type = 'sine'; o.frequency.setValueAtTime(f0, when); o.frequency.exponentialRampToValueAtTime(f0 * rr(1.2, 1.6), when + 0.07);
+  g.gain.setValueAtTime(0, when); g.gain.linearRampToValueAtTime(0.05, when + 0.01); g.gain.exponentialRampToValueAtTime(0.0005, when + 0.11);
+  p.pan.value = pan;
+  o.connect(g); g.connect(p); p.connect(audio.master);
+  o.start(when); o.stop(when + 0.13);
+}
+let audioAcc = 0;
+function updateAudio(dt) {
+  if (!audio.ctx) return;
+  audioAcc += dt; if (audioAcc < 0.2) return; const step = audioAcc; audioAcc = 0;
+  const ctx = audio.ctx, now = ctx.currentTime, h = player.h;
+  // 周囲の街区の密度（都心=1、公園=0.1）
+  let dens = 0, park = 0;
+  for (const [dx, dz] of [[0, 0], [120, 0], [-120, 0], [0, 120], [0, -120]]) {
+    const t = typeAt(player.th + dx / R, player.z + dz);
+    dens += t ? CAR_D[t] : 0; park += t === 'park' ? 1 : 0;
+  }
+  dens /= 5; park /= 5;
+  const low = 1 - THREE.MathUtils.smoothstep(h, 30, 900);
+  const set = (gn, v) => gn.gain.setTargetAtTime(audio.muted ? 0 : v, now, 0.4);
+  set(audio.city, (0.08 + 0.3 * dens) * low);
+  set(audio.wind, 0.05 + 0.35 * THREE.MathUtils.smoothstep(h, 40, 1500));
+  audio.bp.frequency.setTargetAtTime(380 + 300 * Math.sin(now * 0.31) + 200 * Math.sin(now * 0.13), now, 0.5);
+  set(audio.hum, 0.05 * THREE.MathUtils.smoothstep(h, R - 900, R - 100));
+  // 公園や住宅街の低いところでは鳥がさえずる
+  const birdRate = (park * 1.5 + 0.2 * (1 - dens)) * (1 - THREE.MathUtils.smoothstep(h, 20, 200)) * (1 - U.uNight.value); // 夜は鳴かない
+  if (!audio.muted && Math.random() < birdRate * step * 1.2) {
+    const n = 2 + Math.floor(Math.random() * 4), pan = Math.random() * 1.6 - 0.8;
+    for (let i = 0; i < n; i++) chirp(ctx, now + i * rr(0.09, 0.16), pan);
+  }
+}
+addEventListener('pointerdown', startAudio);
+addEventListener('keydown', e => {
+  if (e.code === 'KeyM' && audio.ctx) { audio.muted = !audio.muted; el('s-snd').textContent = audio.muted ? 'ミュート中（M で解除）' : 'ON（M でミュート）'; }
+  else startAudio();
+});
+const VTYPES = [
+  { geo: GEO.car, v: [7, 13], cols: PAL.car },
+  { geo: GEO.bus, v: [5, 9], cols: [0x2e7d5b, 0xd8a531, 0x2f5fa8, 0xc0392b, 0xf2f3f5, 0x17a2d8] },
+  { geo: GEO.truck, v: [6, 10], cols: [0xf2f3f5, 0xd8d2c4, 0x3d6fa8, 0xc0392b, 0x4caf50, 0xf08a24] },
+];
+function buildLocalLife() {
+  const carRecs = [];
+  const recs = [[], [], []], cnt = [0, 0, 0];
+  for (let i = 0; i < LC.n; i++) {
+    const t = i % 10 < 7 ? 0 : i % 10 < 8 ? 1 : 2;
+    local.cars.push({ on: false, t, idx: cnt[t]++ });
+    recs[t].push(0, 0, 0, 0, 0, 0, pick(VTYPES[t].cols));
+  }
+  localCarMeshes = VTYPES.map((v, t) => { const m = instanced(v.geo, M.carShape, recs[t], 7); m.frustumCulled = false; return m; });
+  // 人: 胴体（服の色をインスタンスごとに）＋ 頭と脚（頂点カラー）
+  const col = (g, c) => { const n = g.attributes.position.count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) a.set(c, i * 3); g.setAttribute('color', new THREE.BufferAttribute(a, 3)); return g; };
+  const body = new THREE.BoxGeometry(0.46, 0.62, 0.28).translate(0, 1.16, 0);
+  const skin = mergeGeometries([col(new THREE.BoxGeometry(0.36, 0.85, 0.24).translate(0, 0.425, 0), [0.14, 0.16, 0.22]), col(new THREE.BoxGeometry(0.22, 0.24, 0.22).translate(0, 1.6, 0), [0.86, 0.68, 0.55])]);
+  const shirts = [0xe8463a, 0x2f6fd8, 0xf2c230, 0xf4f4f4, 0x2b2b2b, 0x4caf50, 0xd8448a, 0x8a4fc8, 0xf08a24, 0x9aa3ad];
+  const pr = [];
+  for (let i = 0; i < LP.n; i++) { local.peds.push({ on: false, bob: rand() * TAU }); pr.push(0, 0, 0, 0, 0, 0, pick(shirts)); }
+  pedBodyMesh = instanced(body, patch(new THREE.MeshStandardMaterial({ roughness: 0.85 })), pr, 7, { cast: false });
+  pedSkinMesh = new THREE.InstancedMesh(skin, patch(new THREE.MeshStandardMaterial({ roughness: 0.8, vertexColors: true })), LP.n);
+  pedSkinMesh.instanceMatrix = pedBodyMesh.instanceMatrix;
+  pedBodyMesh.frustumCulled = pedSkinMesh.frustumCulled = false;
+  scene.add(...localCarMeshes, pedBodyMesh, pedSkinMesh);
+}
+// カメラ周辺のランダムな地点を、街区の密度に比例した確率で採用する
+function sampleNear(radius, dens) {
+  const ang = rand() * TAU, d = Math.sqrt(rand()) * radius;
+  const th = player.th + Math.cos(ang) * d / R, z = player.z + Math.sin(ang) * d;
+  const t = typeAt(th, z);
+  if (!t || rand() > dens[t]) return null;
+  const k = stripOf(th);
+  return { k, s: angDiff(th, STRIP_PHI[k]) * R, z, t };
+}
+const edgeZ = z => (Math.round(z / P - 0.5) + 0.5) * P;
+function spawnCar(c) {
+  const p = sampleNear(LC.r, CAR_D); if (!p) return;
+  const dir = rand() < 0.5 ? 1 : -1;
+  c.ring = rand() < 0.5; c.k = p.k; c.v = rr(...VTYPES[c.t].v) * dir;
+  if (c.ring) { c.z = edgeZ(p.z) + dir * 3.5; c.s = p.s; } else { c.s = Math.round(p.s / P) * P + dir * 3.5; c.z = p.z; }
+  c.on = true;
+}
+function spawnPed(q) {
+  const p = sampleNear(LP.r, PED_D); if (!p) return;
+  const dir = rand() < 0.5 ? 1 : -1, side = rand() < 0.5 ? 1 : -1;
+  q.ring = rand() < 0.5; q.k = p.k; q.v = rr(1.0, 1.6) * dir;
+  if (p.t === 'park') { q.s = p.s; q.z = p.z; }                       // 公園は自由に歩く
+  else if (q.ring) { q.z = edgeZ(p.z) + side * 6.5; q.s = p.s; }      // 歩道
+  else { q.s = Math.round(p.s / P) * P + side * 6.5; q.z = p.z; }
+  q.on = true;
+}
+function far(o, r) {
+  const th = STRIP_PHI[o.k] + o.s / R;
+  return Math.hypot(angDiff(th, player.th) * R, o.z - player.z) > r || Math.abs(o.s) > STRIP_W / 2 - 10 || Math.abs(o.z) > HL - 60;
+}
+function updateLocalLife(dt, t) {
+  local.cars.forEach(c => {
+    const a = localCarMeshes[c.t].instanceMatrix.array, i = c.idx;
+    if (!c.on) { spawnCar(c); if (!c.on) { writeBox(a, i * 16, 0, 0, 0, 0, 0, 0); return; } }
+    if (c.ring) c.s += c.v * dt; else c.z += c.v * dt;
+    if (far(c, LC.r * 1.15)) { c.on = false; writeBox(a, i * 16, 0, 0, 0, 0, 0, 0); return; }
+    const th = STRIP_PHI[c.k] + c.s / R;
+    writeCar(a, i * 16, th, c.z, c.ring, Math.sign(c.v));
+  });
+  for (const m of localCarMeshes) m.instanceMatrix.needsUpdate = true;
+  const b = pedBodyMesh.instanceMatrix.array;
+  local.peds.forEach((q, i) => {
+    if (!q.on) { spawnPed(q); if (!q.on) { writeBox(b, i * 16, 0, 0, 0, 0, 0, 0); return; } }
+    if (q.ring) q.s += q.v * dt; else q.z += q.v * dt;
+    if (far(q, LP.r * 1.15)) { q.on = false; writeBox(b, i * 16, 0, 0, 0, 0, 0, 0); return; }
+    writeBox(b, i * 16, STRIP_PHI[q.k] + q.s / R, q.z, Math.abs(Math.sin(t * 7 + q.bob)) * 0.06, 1, 1, 1);
+  });
+  pedBodyMesh.instanceMatrix.needsUpdate = true;
+}
+
+// ===== 無重力の中心軸ぞいを両端の宇宙港まで往復する船 =====
+const ships = [];
+function buildShips() {
+  const parts = [];
+  const paint = (g, hex) => { const c = new THREE.Color(hex), n = g.attributes.position.count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) a.set([c.r, c.g, c.b], i * 3); g.setAttribute('color', new THREE.BufferAttribute(a, 3)); return g; };
+  const box = (w, h, d, x, y, z, col) => parts.push(paint(new THREE.BoxGeometry(w, h, d).translate(x, y, z), col));
+  const tube = (r0, r1, len, z, col, seg = 14) => parts.push(paint(new THREE.CylinderGeometry(r1, r0, len, seg).rotateX(Math.PI / 2).translate(0, 0, z), col));
+  const take = () => { const g = mergeGeometries(parts); parts.length = 0; return g; };
+  const containerCols = [0xb8452f, 0x2f6fa8, 0xd8a531, 0x3d8a52, 0x8a8f96, 0xe2e2dc, 0x7a3f74];
+
+  // 推進剤は使わない（軸構造に沿って電磁的に加減速する想定）ので噴射口・噴射光はなし。
+  // 遠くからも見分けられるよう船体は彩度の高い色にし、白は少なめ。
+  const HULL = [0xd8432f, 0xf08a24, 0xf2c230, 0x1fa59a, 0x2f6fd8, 0x8a4fc8, 0xd8448a, 0x4caf50, 0x17a2d8, 0xf2f3f5];
+  const hullCol = () => rand() < 0.08 ? 0xf2f3f5 : HULL[Math.floor(rand() * (HULL.length - 1))];
+  const shade = (hex, f) => new THREE.Color(hex).multiplyScalar(f).getHex();
+  // 貨物船: 背骨にコンテナを4方向に積む（全長約270m）
+  const cargoGeo = col => {
+    box(8, 8, 240, 0, 0, 0, 0x6d737b);
+    box(28, 20, 26, 0, 4, 118, col); box(34, 6, 8, 0, 12, 128, 0x2b3440);
+    box(32, 32, 34, 0, 0, -122, shade(col, 0.75));
+    for (let z = -96; z <= 96; z += 14) for (const [x, y] of [[9, 9], [-9, 9], [9, -9], [-9, -9], [0, 15], [0, -15], [15, 0], [-15, 0]])
+      if (rand() > 0.12) box(8.6, 8.6, 13, x, y, z, pick(containerCols));
+    return take();
+  };
+  // 旅客船: 流線形の船体（全長約170m）
+  const linerGeo = col => {
+    const acc = shade(col, 0.7);
+    tube(13, 13, 110, 0, col, 20);
+    parts.push(paint(new THREE.SphereGeometry(13, 20, 10, 0, TAU, 0, Math.PI / 2).rotateX(Math.PI / 2).scale(1, 1, 2.6).translate(0, 0, 55), col));
+    tube(13, 8, 24, -67, acc, 20);
+    box(4, 22, 30, 0, 18, -50, acc); box(40, 3, 22, 0, 0, -52, acc);
+    return take();
+  };
+  // 窓の列（自発光）
+  const winTex = (() => {
+    const [c, g] = canvas(64, 512);
+    g.fillStyle = '#000'; g.fillRect(0, 0, 64, 512);
+    for (const u of [12, 44]) for (let v = 6; v < 506; v += 9) { g.fillStyle = rand() < 0.85 ? '#ffe2a8' : '#5a5040'; g.fillRect(u, v, 6, 5); }
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+  })();
+  const winMat = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0xffffff, emissiveMap: winTex, emissiveIntensity: 2.2, transparent: true, opacity: 0.95, alphaMap: winTex });
+  const winGeo = new THREE.CylinderGeometry(13.15, 13.15, 104, 20, 1, true).rotateX(Math.PI / 2);
+  // シャトル: 小型で速い（全長約30m）
+  const shuttleGeo = col => { box(9, 6, 26, 0, 0, 0, col); box(20, 1.5, 9, 0, 0, -6, shade(col, 0.7)); box(6, 3, 6, 0, 3, 7, 0x24303d); return take(); };
+
+  const navMat = [new THREE.MeshBasicMaterial({ color: new THREE.Color(8, 0.4, 0.3) }), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.3, 8, 0.6) }), new THREE.MeshBasicMaterial({ color: new THREE.Color(8, 8, 8) })];
+  const navGeo = new THREE.SphereGeometry(1, 6, 4);
+
+  const kinds = [
+    { geo: cargoGeo, len: 280, n: 6, speed: [45, 65], lane: [210, 300], nav: [[-17, 0, 118], [17, 0, 118], [0, 18, -100]] },
+    { geo: linerGeo, len: 175, n: 7, speed: [70, 95], lane: [120, 190], stripe: [27, 110, 13.5], nav: [[-21, 0, -52], [21, 0, -52], [0, 30, -50]], windows: true },
+    { geo: shuttleGeo, len: 30, n: 14, speed: [120, 180], lane: [55, 110], stripe: [9.4, 20, 3.2], nav: [[-10, 0, -6], [10, 0, -6], [0, 4, 9]] },
+  ];
+  for (const k of kinds) for (let i = 0; i < k.n; i++) {
+    const grp = new THREE.Group();
+    const col = hullCol();
+    grp.add(new THREE.Mesh(k.geo(col), M.ship));
+    if (k.windows) grp.add(new THREE.Mesh(winGeo, winMat));
+    // 船体色で光る帯（遠くでも色で見分けられる）
+    if (k.stripe) {   // 貨物船は光る帯なし（航行灯だけ）
+      const [sw, sl, sy] = k.stripe;
+      grp.add(new THREE.Mesh(new THREE.BoxGeometry(sw, 0.8, sl).translate(0, -sy, 0), new THREE.MeshBasicMaterial({ color: new THREE.Color(col).multiplyScalar(4) })));
+    }
+    const navs = k.nav.map((p, j) => { const m = new THREE.Mesh(navGeo, navMat[j]); m.position.set(...p); m.scale.setScalar(k.len > 100 ? 2.2 : 0.8); grp.add(m); return m; });
+    const a = rand() * TAU, r = rr(...k.lane), stop = HL - 240 - k.len / 2;
+    scene.add(grp);
+    ships.push({ grp, navs, x: r * Math.cos(a), y: r * Math.sin(a), roll: a, stop, v: rr(...k.speed), dwell: rr(8, 20), phase: rand() * 1000, dir: rand() < 0.5 ? 1 : -1 });
+  }
+
+  // 両端の宇宙港（軸上のハブ）
+  for (const sg of [-1, 1]) {
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(330, 420, 200, 32).rotateX(Math.PI / 2).translate(0, 0, sg * (HL - 100)), M.steel);
+    scene.add(hub);
+    const lights = [];
+    for (let i = 0; i < 24; i++) { const a = i / 24 * TAU; lights.push(Math.cos(a) * 335, Math.sin(a) * 335, sg * (HL - 202)); }
+    const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute(lights, 3));
+    scene.add(new THREE.Points(lg, new THREE.PointsMaterial({ color: new THREE.Color(6, 5, 3), size: 6, sizeAttenuation: false })));
+  }
+}
+
+function updateShips(t) {
+  for (const s of ships) {
+    const T = (2 * s.stop) / s.v * 1.3, cyc = T + s.dwell;   // 加減速ぶん1.3倍
+    const local = (t + s.phase) % (2 * cyc), leg = local < cyc ? 0 : 1, tt = local - leg * cyc;
+    const dir = leg === 0 ? s.dir : -s.dir, zA = -dir * s.stop;
+    let z, yaw;
+    if (tt < T) {
+      const u = tt / T, e = u * u * (3 - 2 * u);              // 港を出て加速し、着く前に減速
+      z = zA + 2 * dir * s.stop * e; yaw = dir > 0 ? 0 : Math.PI;
+    } else {
+      const u = (tt - T) / s.dwell;                            // 停泊中にゆっくり回頭
+      z = -zA; yaw = (dir > 0 ? 0 : Math.PI) + Math.PI * THREE.MathUtils.smoothstep(u, 0.2, 0.9);
+    }
+    s.grp.position.set(s.x, s.y, z);
+    s.grp.rotation.set(0, yaw, s.roll, 'YXZ');
+    const blink = (t * 1.2 + s.phase) % 1 < 0.12;
+    s.navs[2].visible = blink;
+  }
+}
+
+function buildClouds() {
+  const [c, g] = canvas(128, 128);
+  for (let n = 0; n < 30; n++) {
+    const x = 64 + rr(-26, 26), y = 64 + rr(-20, 22), r = rr(10, 28);
+    const gr = g.createRadialGradient(x, y, 0, x, y, r);
+    const v = 200 + rand() * 55 | 0;
+    gr.addColorStop(0, `rgba(${v},${v},${v},0.32)`); gr.addColorStop(1, `rgba(${v},${v},${v},0)`);
+    g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  const puffs = [];
+  const nC = LOW ? 110 : 190;
+  for (let n = 0; n < nC; n++) {
+    const th = rand() * TAU, z = rr(-HL + 700, HL - 700), alt = rr(1000, 1450);
+    const W = rr(280, 750), D = W * rr(0.6, 1.3), H = W * rr(0.25, 0.45), np = 8 + Math.floor(rand() * 10);
+    for (let q = 0; q < np; q++) {
+      const e = rr(-0.5, 0.5), nn = rr(-0.5, 0.5), edge = 1 - Math.min(1, 2.2 * Math.hypot(e, nn));
+      const v = rand() * H * (0.3 + 0.7 * edge);
+      const size = W * rr(0.3, 0.5) * (0.6 + 0.5 * edge);
+      const p = cyl(R - alt - v, th + e * W / (R - alt), z + nn * D);
+      puffs.push({ p, size, shade: 0.82 + 0.18 * (v / H), rot: rand() * TAU });
+    }
+  }
+  const N = puffs.length;
+  const geo = new THREE.InstancedBufferGeometry();
+  const base = new THREE.PlaneGeometry(1, 1);
+  geo.index = base.index; geo.setAttribute('position', base.attributes.position); geo.setAttribute('uv', base.attributes.uv);
+  const aPos = new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3), aMisc = new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3);
+  aPos.setUsage(THREE.DynamicDrawUsage); aMisc.setUsage(THREE.DynamicDrawUsage);
+  geo.setAttribute('iPos', aPos); geo.setAttribute('iMisc', aMisc);
+  geo.instanceCount = N;
+  const mat = new THREE.ShaderMaterial({
+    uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { map: { value: null }, uLit: { value: new THREE.Color(1.25, 1.22, 1.15) }, uShadow: { value: new THREE.Color(0.48, 0.54, 0.66) } }]),
+    vertexShader: `
+      #include <common>
+      #include <fog_pars_vertex>
+      #include <logdepthbuf_pars_vertex>
+      attribute vec3 iPos; attribute vec3 iMisc;
+      varying vec2 vUv; varying float vY; varying float vShade; varying float vFade;
+      void main() {
+        vec4 mvPosition = viewMatrix * vec4(iPos, 1.0);
+        mvPosition.xy += position.xy * iMisc.x;
+        float c = cos(iMisc.z), s = sin(iMisc.z);
+        vUv = mat2(c, -s, s, c) * (uv - 0.5) + 0.5;
+        vY = position.y; vShade = iMisc.y;
+        vFade = smoothstep(iMisc.x * 0.4, iMisc.x * 1.5, length(mvPosition.xyz));
+        gl_Position = projectionMatrix * mvPosition;
+        #include <logdepthbuf_vertex>
+        #include <fog_vertex>
+      }`,
+    fragmentShader: `
+      #include <common>
+      #include <fog_pars_fragment>
+      #include <logdepthbuf_pars_fragment>
+      uniform sampler2D map; uniform vec3 uLit; uniform vec3 uShadow;
+      varying vec2 vUv; varying float vY; varying float vShade; varying float vFade;
+      void main() {
+        #include <logdepthbuf_fragment>
+        vec4 t = texture2D(map, vUv);
+        float a = t.a * 2.2 * vFade;
+        if (a < 0.004) discard;
+        float lit = smoothstep(-0.55, 0.45, vY + (t.r - 0.85) * 1.2);
+        gl_FragColor = vec4(mix(uShadow, uLit, lit) * vShade, min(a, 1.0));
+        #include <fog_fragment>
+      }`,
+    transparent: true, depthWrite: false, fog: true,
+  });
+  mat.uniforms.map.value = tex;
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.frustumCulled = false; mesh.renderOrder = 1;
+  const order = puffs.map((_, i) => i), d2 = new Float32Array(N);
+  const sort = cam => {
+    for (let i = 0; i < N; i++) d2[i] = puffs[i].p.distanceToSquared(cam);
+    order.sort((a, b) => d2[b] - d2[a]); // 奥から手前へ
+    order.forEach((idx, i) => { const f = puffs[idx]; aPos.setXYZ(i, f.p.x, f.p.y, f.p.z); aMisc.setXYZ(i, f.size, f.shade, f.rot); });
+    aPos.needsUpdate = aMisc.needsUpdate = true;
+  };
+  return { mesh, sort };
+}
+
+// ===== ポストエフェクト: 被写界深度（自動フォーカス）→ ブルーム → トーンマップ =====
+const post = { on: true };
+function makePost() {
+  const pr = renderer.getPixelRatio(), w = Math.floor(innerWidth * pr), h = Math.floor(innerHeight * pr);
+  post.sceneRT = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, samples: 4, depthTexture: new THREE.DepthTexture(w, h) });
+  post.dofRT = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType });
+  post.aoRT = new THREE.WebGLRenderTarget(w >> 1, h >> 1, { type: THREE.HalfFloatType, depthBuffer: false });
+  post.focusRT = [0, 1].map(() => new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false }));
+  post.fi = 0;
+  const depthFn = `
+    uniform sampler2D tDepth; uniform float uFar;
+    // log depth buffer の値から視点距離を復元: d = log2(1+w)/log2(far+1)
+    float viewDist(vec2 uv) { return pow(uFar + 1.0, texture2D(tDepth, uv).x) - 1.0; }`;
+  post.focusQuad = new FullScreenQuad(new THREE.ShaderMaterial({
+    uniforms: { tDepth: { value: null }, tPrev: { value: null }, uFar: { value: camera.far }, uK: { value: 0 } },
+    vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+    fragmentShader: depthFn + `
+      uniform sampler2D tPrev; uniform float uK;
+      void main() {
+        float acc = 0.0;
+        for (int x = -1; x <= 1; x++) for (int y = -1; y <= 1; y++) acc += log2(min(viewDist(vec2(0.5) + vec2(x, y) * 0.03), 20000.0));
+        gl_FragColor = vec4(mix(texture2D(tPrev, vec2(0.5)).r, acc / 9.0, uK), 0.0, 0.0, 1.0);
+      }`,
+  }));
+  // 画面空間AO: 深度から視点空間の位置と法線を復元し、半径4m以内で接平面より上にある点の割合を遮蔽とみなす
+  post.aoQuad = new FullScreenQuad(new THREE.ShaderMaterial({
+    uniforms: { tDepth: { value: null }, uFar: { value: camera.far }, uTan: { value: new THREE.Vector2() } },
+    vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+    fragmentShader: depthFn + `
+      uniform vec2 uTan; varying vec2 vUv;
+      vec3 viewPos(vec2 uv) { float w = viewDist(uv); return vec3((uv * 2.0 - 1.0) * uTan * w, -w); }
+      void main() {
+        float w = viewDist(vUv);
+        if (w > 2500.0) { gl_FragColor = vec4(1.0); return; }
+        vec3 p = viewPos(vUv);
+        vec3 n = normalize(cross(dFdx(p), dFdy(p)));
+        if (dot(n, p) > 0.0) n = -n;
+        const float RAD = 4.0;
+        vec2 uvR = min(vec2(RAD) / (2.0 * w * uTan), vec2(0.08));
+        float nz = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+        float occ = 0.0;
+        for (int i = 0; i < 12; i++) {
+          float a = (float(i) + nz) * 2.39996 + nz * 6.283, r = sqrt((float(i) + 0.5) / 12.0);
+          vec3 v = viewPos(vUv + vec2(cos(a), sin(a)) * r * uvR) - p;
+          float vv = dot(v, v);
+          occ += max(0.0, 1.0 - vv / (RAD * RAD)) * max(0.0, dot(v, n) / sqrt(vv + 1e-4) - 0.12);
+        }
+        float ao = clamp(1.0 - occ / 12.0 * 2.2, 0.0, 1.0);
+        gl_FragColor = vec4(mix(ao, 1.0, smoothstep(250.0, 1200.0, w)));
+      }`,
+  }));
+  post.dofQuad = new FullScreenQuad(new THREE.ShaderMaterial({
+    uniforms: { tColor: { value: null }, tAO: { value: null }, uAOTexel: { value: new THREE.Vector2(2 / w, 2 / h) }, tDepth: { value: null }, tFocus: { value: null }, uFar: { value: camera.far }, uRes: { value: new THREE.Vector2(w, h) }, uMaxR: { value: 6 * h / 800 } },
+    vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+    fragmentShader: depthFn + `
+      uniform sampler2D tColor; uniform sampler2D tFocus; uniform sampler2D tAO; uniform vec2 uAOTexel; uniform vec2 uRes; uniform float uMaxR;
+      vec3 shaded(vec2 uv) { return texture2D(tColor, uv).rgb * texture2D(tAO, uv).r; }
+      varying vec2 vUv;
+      float F;
+      float coc(float z) {
+        if (z > uFar * 0.9) return 0.0;          // 宇宙（背景）はボカさず星を残す
+        // 手前のボケは控えめ、奥はピント距離が近いほど強くボケる
+        if (z < F) return clamp((F / max(z, 0.1) - 1.0) * 0.06, 0.0, 1.0) * uMaxR;
+        float ap = 0.35 + 0.45 * clamp(40.0 / F, 0.0, 1.0);
+        return clamp((1.0 - F / z) * ap, 0.0, 1.0) * uMaxR;
+      }
+      void main() {
+        F = min(exp2(texture2D(tFocus, vec2(0.5)).r), 150.0); // 遠くを見ても中景（〜150m）はシャープに保つ
+        float cz = viewDist(vUv), cc = coc(cz);
+        float ao4 = 0.25 * (texture2D(tAO, vUv + uAOTexel * vec2(0.5, 0.5)).r + texture2D(tAO, vUv + uAOTexel * vec2(-0.5, 0.5)).r
+                          + texture2D(tAO, vUv + uAOTexel * vec2(0.5, -0.5)).r + texture2D(tAO, vUv + uAOTexel * vec2(-0.5, -0.5)).r);
+        vec3 acc = texture2D(tColor, vUv).rgb * ao4; float ws = 1.0;
+        const int N = 40;
+        for (int i = 0; i < N; i++) {
+          float r = sqrt((float(i) + 0.5) / float(N)) * uMaxR, a = float(i) * 2.39996;
+          vec2 suv = vUv + vec2(cos(a), sin(a)) * r / uRes;
+          float sz = viewDist(suv), sc = coc(sz);
+          float eff = sz > cz ? min(sc, cc) : sc;   // 奥のボケが手前のピント面ににじまない
+          float w = smoothstep(r - 1.0, r + 0.5, eff);
+          acc += shaded(suv) * w; ws += w;
+        }
+        vec3 col = acc / ws;
+        vec2 q = vUv - 0.5;
+        col *= 1.0 - 0.35 * dot(q, q) * 2.0;     // ビネット
+        gl_FragColor = vec4(col, 1.0);
+      }`,
+  }));
+  post.bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.4, 0.55, 1.15);
+  // 仕上げ: トーンマップ（ACES / AgX）→ 色調整 → sRGB → わずかなS字・色収差・グレイン・ディザ
+  post.final = new FullScreenQuad(new THREE.ShaderMaterial({
+    uniforms: { tDiffuse: { value: null }, toneMappingExposure: { value: 1 }, uTM: { value: 0 }, uTime: { value: 0 } },
+    vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+    fragmentShader: `
+      uniform sampler2D tDiffuse; uniform int uTM; uniform float uTime; varying vec2 vUv; // トーンマップ・sRGB関数は three が自動で前置する
+      void main() {
+        vec2 dc = vUv - 0.5; float ca = dot(dc, dc) * 0.006;
+        vec3 c = vec3(texture2D(tDiffuse, vUv - dc * ca).r, texture2D(tDiffuse, vUv).g, texture2D(tDiffuse, vUv + dc * ca).b);
+        c = uTM == 0 ? ACESFilmicToneMapping(c) : AgXToneMapping(c);
+        float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+        c = mix(vec3(l), c, 1.1);                                                     // 彩度を少し上げる
+        c *= mix(vec3(0.96, 1.0, 1.06), vec3(1.04, 1.0, 0.95), smoothstep(0.15, 0.75, l)); // 影は青、光は暖色
+        c = sRGBTransferOETF(vec4(max(c, 0.0), 1.0)).rgb;
+        c = mix(c, c * c * (3.0 - 2.0 * c), 0.12);                                    // 控えめなS字コントラスト
+        float n = fract(sin(dot(gl_FragCoord.xy + fract(uTime) * 97.0, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
+        c += n * (1.5 / 255.0) + n * 0.012;                                           // ディザ（縞消し）＋グレイン
+        gl_FragColor = vec4(c, 1.0);
+      }`,
+  }));
+}
+function renderFrame(dt) {
+  if (!post.on) { renderer.setRenderTarget(null); renderer.render(scene, camera); return; }
+  renderer.setRenderTarget(post.sceneRT);
+  renderer.render(scene, camera);
+  const fm = post.focusQuad.material.uniforms;
+  fm.tDepth.value = post.sceneRT.depthTexture; fm.tPrev.value = post.focusRT[post.fi].texture; fm.uK.value = 1 - Math.exp(-dt * 5);
+  post.fi = 1 - post.fi;
+  renderer.setRenderTarget(post.focusRT[post.fi]); post.focusQuad.render(renderer);
+  const dm = post.dofQuad.material.uniforms;
+  dm.tColor.value = post.sceneRT.texture; dm.tDepth.value = post.sceneRT.depthTexture; dm.tFocus.value = post.focusRT[post.fi].texture;
+  const am = post.aoQuad.material.uniforms;
+  am.tDepth.value = post.sceneRT.depthTexture;
+  const ty = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2); am.uTan.value.set(ty * camera.aspect, ty);
+  renderer.setRenderTarget(post.aoRT); post.aoQuad.render(renderer);
+  dm.tAO.value = post.aoRT.texture;
+  renderer.setRenderTarget(post.dofRT); post.dofQuad.render(renderer);
+  post.bloom.render(renderer, null, post.dofRT, dt, false);
+  const fu = post.final.material.uniforms;
+  fu.tDiffuse.value = post.dofRT.texture; fu.toneMappingExposure.value = renderer.toneMappingExposure; fu.uTime.value += dt;
+  renderer.setRenderTarget(null); post.final.render(renderer);
+}
+
+function updateVehicles(t) {
+  const a = carMesh.instanceMatrix.array;
+  const zSpan = L - 100, z0 = -HL + 50;
+  const lightsOn = U.uNight.value > 0.01;
+  carLights.visible = lightsOn; carLights.material.uniforms.uNight.value = U.uNight.value;
+  const lPos = carLights.geometry.attributes.position.array, lOn = carLights.geometry.attributes.aOn.array;
+  vehicles.cars.forEach((c, q) => {
+    const th = c.ring ? c.ph + c.v * t : c.lane, z = c.ring ? c.lane : z0 + (((c.ph + c.v * t) % zSpan) + zSpan) % zSpan;
+    if (player.h < 400 && Math.abs(z - player.z) < 650 && Math.abs(angDiff(th, player.th)) * R < 650) { writeBox(a, q * 16, 0, 0, 0, 0, 0, 0); lOn[q * 2] = lOn[q * 2 + 1] = 0; return; }
+    if (c.ring) writeBox(a, q * 16, th, z, 0, 4.5, 1.5, 1.8);
+    else writeBox(a, q * 16, th, z, 0, 1.8, 1.5, 4.5);
+    if (lightsOn) {
+      const dir = Math.sign(c.v), r = R - 0.8;
+      for (let k = 0; k < 2; k++) {                       // k=0 前（ヘッドライト）, k=1 後ろ（テールライト）
+        const off = (k ? -2.3 : 2.3) * dir;
+        const tt = c.ring ? th + off / r : th, zz = c.ring ? z : z + off;
+        lPos.set([r * Math.cos(tt), r * Math.sin(tt), zz], (q * 2 + k) * 3);
+        lOn[q * 2 + k] = 1;
+      }
+    }
+  });
+  carMesh.instanceMatrix.needsUpdate = true;
+  if (lightsOn) { carLights.geometry.attributes.position.needsUpdate = carLights.geometry.attributes.aOn.needsUpdate = true; }
+  const b = trainMesh.instanceMatrix.array, tSpan = L - 400, tz0 = -HL + 200;
+  vehicles.trains.forEach((tr, q) => {
+    const dir = Math.sign(tr.v);
+    for (let n = 0; n < 8; n++) {
+      const o = (q * 8 + n) * 16;
+      if (tr.ring) writeBox(b, o, tr.ph + tr.v * t - dir * n * 21 / (R - 16), tr.lane, 16, 20, 3.6, 3.0);
+      else {
+        const z = tz0 + ((((tr.ph + tr.v * t - dir * n * 21) % tSpan) + tSpan) % tSpan);
+        writeBox(b, o, tr.lane, z, 8, 3.0, 3.6, 20);
+      }
+    }
+  });
+  trainMesh.instanceMatrix.needsUpdate = true;
+}
+
+// ===== プレイヤー（任意の地点に立つ） =====
+const EYE = 15; // 地上視点の目の高さ（ビルの5階くらい）
+const player = { th: 0, z: 0, h: EYE, yaw: 0, pitch: 0.28 };
+const keys = new Set();
+const V = { up: new THREE.Vector3(), east: new THREE.Vector3(), north: new THREE.Vector3(0, 0, 1), f: new THREE.Vector3(), right: new THREE.Vector3(), mv: new THREE.Vector3(), tmp: new THREE.Vector3() };
+let curSpeed = 0;
+
+function updatePlayer(dt) {
+  const { up, east, north, f, right, mv } = V;
+  up.set(-Math.cos(player.th), -Math.sin(player.th), 0);
+  east.set(-Math.sin(player.th), Math.cos(player.th), 0);
+  f.copy(north).multiplyScalar(Math.cos(player.yaw)).addScaledVector(east, Math.sin(player.yaw));
+  right.crossVectors(f, up);
+  mv.set(0, 0, 0);
+  if (keys.has('KeyW') || keys.has('ArrowUp')) mv.add(f);
+  if (keys.has('KeyS') || keys.has('ArrowDown')) mv.sub(f);
+  if (keys.has('KeyD') || keys.has('ArrowRight')) mv.add(right);
+  if (keys.has('KeyA') || keys.has('ArrowLeft')) mv.sub(right);
+  let vert = 0;
+  if (keys.has('KeyE') || keys.has('Space')) vert += 1;
+  if (keys.has('KeyQ') || keys.has('KeyC')) vert -= 1;
+  const boost = keys.has('ShiftLeft') || keys.has('ShiftRight') ? 8 : 1;
+  const speed = (4 + player.h * 0.5) * boost;
+  if (mv.lengthSq() > 0) mv.normalize().multiplyScalar(speed * dt);
+  player.th += mv.dot(east) / (R - player.h);
+  player.z = THREE.MathUtils.clamp(player.z + mv.z, -HL + 30, HL - 30);
+  player.h = THREE.MathUtils.clamp(player.h + vert * speed * dt, 1.7, R - 40);
+  curSpeed = (mv.length() + Math.abs(vert * speed * dt)) / Math.max(dt, 1e-6);
+}
+
+function updateCamera() {
+  const { up, east, north, f } = V;
+  up.set(-Math.cos(player.th), -Math.sin(player.th), 0);
+  east.set(-Math.sin(player.th), Math.cos(player.th), 0);
+  f.copy(north).multiplyScalar(Math.cos(player.yaw)).addScaledVector(east, Math.sin(player.yaw));
+  const r = R - player.h;
+  camera.position.set(r * Math.cos(player.th), r * Math.sin(player.th), player.z);
+  camera.up.copy(up);
+  const dir = V.tmp.copy(f).multiplyScalar(Math.cos(player.pitch)).addScaledVector(up, Math.sin(player.pitch));
+  camera.lookAt(dir.add(camera.position));
+}
+
+let shadowHalf = 0;
+function updateSun() {
+  const k = stripOf(player.th);
+  const tgt = cyl(R, player.th, player.z);
+  sun.target.position.copy(tgt);
+  sun.position.copy(tgt).addScaledVector(sunL[k], 3000);
+  const half = Math.min(2200, Math.round((650 + player.h * 0.8) / 50) * 50);
+  if (half !== shadowHalf) {
+    shadowHalf = half;
+    Object.assign(sun.shadow.camera, { left: -half, right: half, top: half, bottom: -half });
+    sun.shadow.camera.updateProjectionMatrix();
+  }
+  glare.position.copy(camera.position).addScaledVector(sunL[k], 50000);
+  stars.position.copy(camera.position);
+}
+
+function updateLOD() {
+  for (const c of lodChunks) {
+    const near = c.center.distanceTo(camera.position) < 1700;
+    c.near.visible = near; c.far.visible = !near;
+    const dNear = player.h < 600 && c.center.distanceTo(camera.position) < 1000;
+    if (dNear && !c.detail) { c.detail = buildDetail(c); scene.add(c.detail); }
+    if (c.detail) c.detail.visible = dNear;
+    if (c.src.treeLow) c.src.treeLow.visible = !dNear;
+  }
+}
+
+// ===== カメラ周辺のビルだけに足す細部（屋上設備・各階の庇・店先のひさし・煙突） =====
+const AWNING = [0xc0392b, 0x2e7d5b, 0x2f5fa8, 0xd8a531, 0x6b4f3a, 0xe8e2d4];
+function buildDetail(c) {
+  const rnd = mulberry32(c.seed * 7919), rrd = (a, b) => a + (b - a) * rnd();
+  const out = [];
+  const put = (th, z, h0, w, h, d, col) => out.push(th, z, h0, w, h, d, col);
+  const b = c.src.bld;
+  for (let o = 0; o < b.length; o += 7) {
+    const [th, z, h0, w, h, d, col] = b.slice(o, o + 7), top = h0 + h;
+    const lighter = new THREE.Color(col).lerp(new THREE.Color(0xffffff), 0.35).getHex();
+    const house = h0 === 0 && h < 8;
+    if (house) {                                                   // 煙突
+      if (rnd() < 0.5) put(th + rrd(-0.25, 0.25) * w / R, z + rrd(-0.25, 0.25) * d, top, 0.8, rrd(2.5, 3.6), 0.8, 0x7a6a5e);
+      continue;
+    }
+    // 屋上: 手すり（パラペット）と空調機・塔屋
+    put(th, z - d / 2 + 0.2, top, w, 1.1, 0.4, lighter); put(th, z + d / 2 - 0.2, top, w, 1.1, 0.4, lighter);
+    put(th - (w / 2 - 0.2) / R, z, top, 0.4, 1.1, d, lighter); put(th + (w / 2 - 0.2) / R, z, top, 0.4, 1.1, d, lighter);
+    const nU = 1 + Math.floor(rnd() * (w * d > 600 ? 5 : 2));
+    for (let n = 0; n < nU; n++) {
+      const uw = rrd(2, Math.min(8, w * 0.4)), ud = rrd(2, Math.min(8, d * 0.4));
+      put(th + rrd(-0.5, 0.5) * (w - uw - 2) / R, z + rrd(-0.5, 0.5) * (d - ud - 2), top, uw, rrd(1.2, 3.5), ud, rnd() < 0.5 ? 0x9a9ea3 : 0xc8c8c4);
+    }
+    if (h > 30 && rnd() < 0.6) put(th, z, top, w * 0.3, rrd(4, 7), d * 0.3, lighter);  // 塔屋
+    // 各階の庇（低層は毎階、高層は5階ごと）
+    const step = h < 45 ? 3.6 : 18;
+    for (let y = h0 + step; y < top - 2; y += step) put(th, z, y - 0.15, w + 0.7, 0.3, d + 0.7, lighter);
+    // 1階の店先のひさし（四面）
+    if (h0 === 0 && h > 9) {
+      const ac = AWNING[Math.floor(rnd() * AWNING.length)];
+      put(th, z - d / 2 - 0.8, 3.2, w * 0.9, 0.25, 1.6, ac); put(th, z + d / 2 + 0.8, 3.2, w * 0.9, 0.25, 1.6, ac);
+      put(th - (w / 2 + 0.8) / R, z, 3.2, 1.6, 0.25, d * 0.9, ac); put(th + (w / 2 + 0.8) / R, z, 3.2, 1.6, 0.25, d * 0.9, ac);
+    }
+  }
+  const grp = new THREE.Group();
+  const det = instanced(GEO.box, M.detail, out, 7, { cast: true }); if (det) grp.add(det);
+  // 木を細かい版に差し替え（広葉樹と針葉樹）
+  const tr = c.src.tree, broad = [], coni = [];
+  for (let o = 0; o < tr.length; o += 7) (rnd() < 0.25 ? coni : broad).push(...tr.slice(o, o + 7));
+  const tb = instanced(GEO.treeBroad, M.tree, broad, 7); if (tb) grp.add(tb);
+  const tc = instanced(GEO.treeConifer, M.tree, coni, 7); if (tc) grp.add(tc);
+  return grp;
+}
+
+// ===== 入力 =====
+let dragging = false;
+renderer.domElement.addEventListener('pointerdown', e => { dragging = true; renderer.domElement.setPointerCapture(e.pointerId); });
+renderer.domElement.addEventListener('pointerup', e => { dragging = false; renderer.domElement.releasePointerCapture(e.pointerId); });
+renderer.domElement.addEventListener('pointermove', e => {
+  if (!dragging) return;
+  player.yaw -= e.movementX * 0.0035;
+  player.pitch = THREE.MathUtils.clamp(player.pitch - e.movementY * 0.0035, -1.5, 1.5);
+});
+addEventListener('keydown', e => {
+  keys.add(e.code);
+  if (e.code === 'KeyH') document.querySelectorAll('.panel').forEach(p => p.classList.toggle('hidden'));
+  if (e.code === 'KeyB') post.on = !post.on;
+  if (e.code === 'KeyN') toggleNight();
+  if (e.code === 'KeyT' && post.final) post.final.material.uniforms.uTM.value ^= 1;
+  if (e.code === 'BracketLeft' || e.code === 'BracketRight') {
+    camera.fov = THREE.MathUtils.clamp(camera.fov + (e.code === 'BracketRight' ? 5 : -5), 45, 115); camera.updateProjectionMatrix();
+  }
+  if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
+});
+addEventListener('keyup', e => keys.delete(e.code));
+addEventListener('blur', () => keys.clear());
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  for (const k of ['sceneRT', 'dofRT', 'aoRT']) post[k].dispose();
+  post.bloom.dispose();
+  makePost();
+});
+
+// ===== ワープ =====
+const go = (th, z, h, yaw, pitch) => Object.assign(player, { th, z, h, yaw, pitch });
+const roadS = s => Math.round(s / P) * P + 6.5; // 最寄りの南北道路の歩道
+const PRESETS = [
+  ['窓際の遊歩道（初期位置）', () => go(STRIP_PHI[0] + (-STRIP_W / 2 + 12) / R, BRIDGE_Z[7] + 260, EYE, 0, 0.28)],
+  ['都心の大通り', () => { const c = landmarks.cbd[0][1]; go(STRIP_PHI[0] + roadS(c.s) / R, c.z, EYE, 0, 0.3); }],
+  ['大きな公園', () => { const p = landmarks.parks[1][0]; go(STRIP_PHI[1] + p.s / R, p.z, EYE, 0, 0.35); }],
+  ['川沿い', () => go(STRIP_PHI[2] + (sCenter(RIVER_I[2]) + P / 2 - 4) / R, 600, EYE, 0, 0.22)],
+  ['橋の上（窓の真上）', () => go(WIN_PHI[0], BRIDGE_Z[6] + 8, EYE, Math.PI / 2 + 0.25, 0.05)],
+  ['超高層ビルの屋上', () => { const t = landmarks.tallest[0]; go(STRIP_PHI[0] + t.s / R, t.z + t.d / 2 - 1, t.h + 3, 0, -0.3); }],
+  ['上空 1500m', () => go(STRIP_PHI[0], -2000, 1500, 0, -0.05)],
+  ['中心軸のそば（無重力帯）', () => go(STRIP_PHI[0], -HL + 1200, R - 80, 0, 0)],
+  ['宇宙港の出口（船の航路）', () => go(STRIP_PHI[0] + 0.2, -HL + 450, R - 360, 0.1, 0.12)],
+];
+const warp = document.getElementById('warp');
+for (const [label, fn] of PRESETS) {
+  const b = document.createElement('button'); b.textContent = label; b.onclick = () => { fn(); b.blur(); }; warp.appendChild(b);
+}
+{ const b = document.createElement('button'); b.textContent = '☀︎ / ☾ 昼と夜を切り替え（N）'; b.onclick = () => { toggleNight(); b.blur(); }; b.style.borderColor = '#d8b25a'; warp.appendChild(b); }
+
+// ===== 展開図ミニマップ =====
+const mm = document.getElementById('minimap'), mg = mm.getContext('2d');
+const MW = mm.width, MH = mm.height;
+let mmBase;
+function drawMinimapBase() {
+  const [c, g] = canvas(MW, MH);
+  g.fillStyle = '#0b1426'; g.fillRect(0, 0, MW, MH);
+  for (let k = 0; k < 3; k++) {
+    const x0 = (STRIP_PHI[k] - SECTOR / 2) / TAU * MW;
+    g.drawImage(stripCanvases[k], x0, 0, MW / 6, MH);
+  }
+  g.fillStyle = 'rgba(200,200,210,0.7)';
+  for (const zb of BRIDGE_Z) for (const psi of WIN_PHI) g.fillRect((psi - SECTOR / 2) / TAU * MW, (zb + HL) / L * MH - 0.5, MW / 6, 1);
+  mmBase = c;
+}
+function drawMinimap() {
+  mg.drawImage(mmBase, 0, 0);
+  const x = normAng(player.th) / TAU * MW, y = (player.z + HL) / L * MH;
+  const hx = Math.sin(player.yaw), hy = Math.cos(player.yaw);
+  mg.save(); mg.translate(x, y); mg.rotate(Math.atan2(hy, hx) - Math.PI / 2);
+  mg.fillStyle = '#ff4d4d'; mg.strokeStyle = '#fff'; mg.lineWidth = 1;
+  mg.beginPath(); mg.moveTo(0, 9); mg.lineTo(5, -5); mg.lineTo(-5, -5); mg.closePath(); mg.fill(); mg.stroke();
+  mg.restore();
+}
+mm.addEventListener('click', e => {
+  const rc = mm.getBoundingClientRect();
+  const th = (e.clientX - rc.left) / rc.width * TAU, z = THREE.MathUtils.clamp((e.clientY - rc.top) / rc.height * L - HL, -HL + 50, HL - 50);
+  const k = stripOf(th);
+  if (isLand(th)) {
+    const s = THREE.MathUtils.clamp(roadS(angDiff(th, STRIP_PHI[k]) * R), -STRIP_W / 2 + 8, STRIP_W / 2 - 8);
+    go(STRIP_PHI[k] + s / R, z, EYE, player.yaw, 0.25);
+  } else {
+    const zb = BRIDGE_Z.reduce((a, b) => Math.abs(b - z) < Math.abs(a - z) ? b : a);
+    go(th, zb + 8, EYE, Math.PI / 2, 0.1);
+  }
+});
+
+// ===== HUD =====
+const el = id => document.getElementById(id);
+let fpsAcc = 0, fpsN = 0;
+function hud(dt) {
+  fpsAcc += dt; fpsN++;
+  if (fpsAcc < 0.4) return;
+  el('s-fps').textContent = Math.round(fpsN / fpsAcc); fpsAcc = 0; fpsN = 0;
+  const k = stripOf(player.th);
+  el('s-loc').textContent = (isLand(player.th) ? `第${k + 1}陸地` : `第${k + 1}窓（橋）`) + ` / 軸方向 ${(player.z / 1000).toFixed(2)} km`;
+  el('s-alt').textContent = player.h < 1000 ? `${player.h.toFixed(1)} m` : `${(player.h / 1000).toFixed(2)} km`;
+  el('s-spd').textContent = `${(curSpeed * 3.6).toFixed(0)} km/h`;
+}
+
+// ===== 起動 =====
+const clock = new THREE.Clock();
+let elapsed = 0, frameNo = 0;
+function frame() {
+  const dt = Math.min(clock.getDelta(), 0.1);
+  elapsed += dt;
+  updatePlayer(dt);
+  updateCamera();
+  updateLOD();
+  updateVehicles(elapsed);
+  updateShips(elapsed);
+  updateAxisTrains(elapsed);
+  updateLocalLife(dt, elapsed);
+  updateBirds(dt, elapsed);
+  updateAudio(dt);
+  updateDayNight(dt);
+  U.uTime.value = elapsed;
+  updateSun();
+  updateEnv(dt);
+  if ((frameNo++ % 20) === 0) clouds.sort(camera.position);
+  M.water.normalMap.offset.set(elapsed * 0.004, elapsed * 0.011);
+  renderFrame(dt);
+  drawMinimap();
+  hud(dt);
+  requestAnimationFrame(frame);
+}
+setTimeout(() => {
+  build();
+  makePost();
+  drawMinimapBase();
+  PRESETS[0][1]();
+  el('loading').classList.add('hidden');
+  window.__ready = true; window.__player = player; window.__ships = ships; window.__night = toggleNight; window.__scene = scene; window.__axis = () => axisCarMesh;
+  frame();
+}, 30);
+</script>
+</body>
+</html>
