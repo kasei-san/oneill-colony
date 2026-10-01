@@ -1466,7 +1466,8 @@ function updateAudio(dt) {
   set(audio.hum, space.on ? 0.03 : 0.05 * THREE.MathUtils.smoothstep(h, R - 900, R - 100));
   // 公園や住宅街の低いところでは鳥がさえずる
   const birdRate = (park * 1.5 + 0.2 * (1 - dens)) * (1 - THREE.MathUtils.smoothstep(h, 20, 200)) * (1 - U.uNight.value) * (space.on ? 0 : 1); // 夜と宇宙では鳴かない
-  if (!audio.muted && Math.random() < birdRate * step * 1.2) {
+  const BIRD_SOUND = false; // 鳥の声はいったん止めている（耳ざわりなため）
+  if (BIRD_SOUND && !audio.muted && Math.random() < birdRate * step * 1.2) {
     const n = 2 + Math.floor(Math.random() * 4), pan = Math.random() * 1.6 - 0.8;
     for (let i = 0; i < n; i++) chirp(ctx, now + i * rr(0.09, 0.16), pan);
   }
