@@ -3632,7 +3632,7 @@ const SNS_SHOTS = [
   { ch: 'L5 SPACE COLONY', t: 'ネオ・ミヤギ', x: '宇宙に浮かぶ\n長さ16kmの円筒の街', dur: 5, night: 0,
     space: { mode: 'overview', from: { az: 0.3, tilt: 1.05, dist: 34000, tz: -2000 }, to: { az: 0.75, tilt: 1.1, dist: 27000, tz: -1500 } } },
   { ch: 'L5 SPACE COLONY', t: '110秒で1回転', x: '回転の遠心力で\n地面に1Gの重さが生まれるのだ', dur: 4,
-    space: { mode: 'overview', from: { az: 1.6, tilt: 1.25, dist: 22000, tz: -500 }, to: { az: 2.1, tilt: 1.35, dist: 19000, tz: 0 } } },
+    space: { mode: 'overview', from: { az: 0.4, tilt: 2.3, dist: 13000, tz: -HL, roll: 1.2 }, to: { az: 0.9, tilt: 2.4, dist: 11000, tz: -7000, roll: 1.35 } } },   // 蓋の側から斜めに。円筒を横倒しに見せ、蓋が回るのを見せる
   { ch: '入港', t: '宇宙港へ', x: '赤い誘導灯に沿って\n中へ入るのだ', dur: 6, fadeOut: true, fadeColor: '#ffffff',
     space: { mode: 'entrance', from: { az: 0.5, tilt: 2.75, dist: 2200, tz: ENTRY_Z - 6000 }, to: { az: 0.2, tilt: 3.05, dist: 500, tz: ENTRY_Z + 150 } } },
   { ch: '円筒の内側', t: '空のかわりに街', x: '見上げると\n反対側の街が広がっているのだ', dur: 4, fadeIn: true, fadeColor: '#ffffff',
@@ -3646,9 +3646,9 @@ const SNS_SHOTS = [
   { ch: '昼のコロニー', t: '300万人の街', x: '円筒の内側を\nぐるりと街が囲むのだ', dur: 5,
     from: () => go(STRIP_PHI[0] + 0.12, 600, 700, 0, -0.32), d: { z: 600, pitch: 0.1 } },
   { ch: '夜が来る', t: 'ミラーが閉じる', x: '外のミラーが窓を覆うと\nコロニーに夜が来るのだ', dur: 8, night: 1,
-    from: () => go(STRIP_PHI[0], -1200, 1500, 0, -0.04), d: { z: 600, pitch: 0.08 }, roll: 0.45 },
+    from: () => go(STRIP_PHI[0] + 0.2, -1200, 1500, -0.35, -0.04), d: { z: 600, pitch: 0.08 }, roll: 0.45 },   // エレベーターが画面の真ん中に来ないよう、横にずらして斜めに見る
   { ch: '夜のコロニー', t: '光の筒', x: '上も下も左右も\nすべてが夜景なのだ', dur: 5,
-    from: () => go(STRIP_PHI[0], -HL + 2500, R - 120, 0, 0), d: { z: 1600, yaw: 0.25 }, roll: 1.2 },
+    from: () => go(STRIP_PHI[0], NEW_YARD_Z - 200, R - 120, 0, 0), d: { z: 1700, yaw: 0.25 }, roll: 1.2 },   // 新造船所の中から抜け出る
   { ch: '観光名所', t: '夜の中央駅', x: 'ネオンと光るエレベーターの\n巨大な灯台なのだ', dur: 5,
     from: () => go(STRIP_PHI[0] + 0.25, HUB_Z - 420, R - 650, 0, 1.15), d: { yaw: 0.3, h: 50 } },
   { ch: '街区', t: '歓楽街', x: '夜になると看板が\n一斉に光るネオン街なのだ', dur: 5,
