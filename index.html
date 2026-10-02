@@ -92,7 +92,7 @@
 <div id="demo-fade"></div>
 <div id="demo-cap"><div class="ch"></div><h2></h2><p></p></div>
 <div id="demo-start" class="hidden"><button>▶ クリックでガイドツアーを始める（音が出ます）</button></div>
-<div id="demo-bar" class="hidden"><span id="demo-pos"></span><button id="demo-prev" title="前へ（←）">⏮</button><button id="demo-pause" title="一時停止（Space）">⏸</button><button id="demo-next" title="次へ（→）">⏭</button><button id="demo-stop" title="終了（Esc）">✕</button><button id="demo-snd" title="音のオン・オフ">🔊</button></div>
+<div id="demo-bar" class="hidden"><span id="demo-pos"></span><button id="demo-prev" title="前へ（←）">⏮</button><button id="demo-pause" title="一時停止（Space）">⏸</button><button id="demo-next" title="次へ（→）">⏭</button><button id="demo-stop" title="デモを終了（Esc）">✕ デモを終了</button><button id="demo-snd" title="音のオン・オフ">🔊</button></div>
 <div id="mapbox" class="panel">
   <div class="cap">展開図（横=周方向 360° / 縦=軸方向）</div>
   <canvas id="minimap" width="360" height="306"></canvas>
@@ -3911,7 +3911,7 @@ addEventListener('keydown', e => {
     if (act) { act(); e.preventDefault(); e.stopImmediatePropagation(); }
   } else if (e.code === 'KeyG') startDemo();
 }, true);
-renderer.domElement.addEventListener('pointerdown', () => { if (SNS) { startAudio(); setMusic(true); } else stopDemo(); });   // SNS 版はクリックで音を出す（止めない）
+renderer.domElement.addEventListener('pointerdown', () => { if (demo.on) { startAudio(); setMusic(true); } });   // ツアー中のクリックは音を出すだけ（終了は「デモを終了」ボタンか Esc）
 { const b = document.createElement('button'); b.textContent = '▶ ガイドツアー SNS版（縦長・約1分）'; b.style.borderColor = '#9fff9f'; b.onclick = () => { location.search = '?sns'; }; warp.prepend(b); }
 { const b = document.createElement('button'); b.textContent = '▶ ガイドツアー（G）'; b.style.borderColor = '#9fff9f'; b.style.fontWeight = '700'; b.onclick = () => { b.blur(); startDemo(); }; warp.prepend(b); }
 
