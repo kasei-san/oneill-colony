@@ -6,6 +6,13 @@ Three.js で作った、オニール型スペースコロニー（島3号型）�
 
 公開ページ: https://kasei-san.com/oneill-colony/ （ガイドツアー: `?demo`、縦長ダイジェスト: `?sns`）
 
+![夜の虹色の観覧車](docs/images/night-ferris-wheel.jpg)
+
+| | |
+|---|---|
+| ![宇宙から見たコロニー](docs/images/space.jpg) | ![頭上にも街がある世界](docs/images/city-overhead.jpg) |
+| ![コロニー中央駅（旧造船所）](docs/images/hub-station.jpg) | ![夜の光の筒](docs/images/tube-of-light.jpg) |
+
 ## 起動
 
 ```sh
