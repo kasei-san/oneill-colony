@@ -22,6 +22,7 @@
 9. 昼夜（`updateDayNight()`）、プレイヤー操作、`PRESETS`（ワープ）、ミニマップ、音（環境音・BGM とも WebAudio 合成）
 10. ガイドツアー `SHOTS`（PC版）と `SNS_SHOTS`（`?sns` の縦長ダイジェスト。`SHOTLIST()` が今のモードの方を返す）: 1場面 = `{ ch, t, x, dur, from, d }`（地上: from で開始位置、d で移動量）または `space: { mode, from, to, target }`（宇宙）。`follow` でカメラを毎フレーム動かす場面、`orbit` で回り込む場面、`roll` でカメラを傾ける場面もある。開始位置のヘルパー: `preset(ラベル)`, `lookAt(k, as, az, bs, bz, h)`, `atSample(type)`, `aimCam(th, z, h, 目標)`
 11. 動画の書き出し `?sns&rec`: `window.__frame(dt)` で1コマずつ進め、BGM は `renderMusicWav` で OfflineAudioContext に合成する（`tools/record-sns.mjs`）。`?demo`・`?sns` はクリックで始める（自動で始めると BGM が鳴らない）
+12. 縦長表示: `SNS`（縦長表示か）・`DIGEST`（`?sns`。場面リストを `SNS_SHOTS` にする）・`MOBILE`（画面自体が縦長。画面いっぱいに出し下に操作バー）の3つのフラグで切り替える。字幕は `wrapWords`（Intl.Segmenter で単語の切れ目にだけ `<wbr>`）と `fitSnsText`（帯からはみ出すと文字を小さく）で帯に収める
 
 ## はまりどころ
 
