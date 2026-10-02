@@ -47,6 +47,17 @@
   .sns #demo-stop { display: none; }   /* 動作確認用: 縦長の枠の外（左下）に操作ボタン */
   .rec #sns-top > *, .rec #sns-bot > *, .rec #demo-fade { transition: none !important; }
   html.sns, html.sns body { background: #111; }
+  #sns-top, #sns-bot { box-sizing: border-box; padding: 0 0.3em; overflow: hidden; }
+  #sns-top .t, #sns-bot .x { max-width: 100%; box-sizing: border-box; word-break: keep-all; overflow-wrap: normal; }   /* 改行は wrapWords が入れた単語の切れ目だけ */
+  /* スマホ: 画面いっぱいに出し、下に指で押せる操作バー */
+  #sns-top .t { line-height: 1.2; }
+  .mobile #sns-bot .x { font-weight: 600; line-height: 1.65; text-align: left; padding: 0 0.5em; }
+  .mobile.sns #demo-bar { left: 0; right: 0; bottom: 0; height: 64px; box-sizing: border-box; padding: 0 10px; border-radius: 0; background: #000; justify-content: center; gap: 12px; font-size: 14px; }
+  .mobile #demo-bar button { min-width: 56px; height: 46px; font-size: 20px; border-radius: 10px; -webkit-tap-highlight-color: transparent; }
+  .mobile #demo-pos { min-width: 4.2em; text-align: center; font-variant-numeric: tabular-nums; }
+  #demo-snd { display: none; }
+  .mobile #demo-snd { display: inline-block; }
+  .mobile #demo-start button { margin: 0 16px; line-height: 1.5; }
   #demo-fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; transition: opacity 0.8s; }
   #demo-bar { position: fixed; right: 16px; bottom: 10px; color: #c8d4e2; font-size: 12px; background: rgba(6,10,20,0.65); padding: 4px 6px 4px 10px; border-radius: 8px; display: flex; align-items: center; gap: 6px; }
   #demo-bar button { background: rgba(255,255,255,0.1); color: #e6edf5; border: 1px solid rgba(255,255,255,0.25); border-radius: 5px; min-width: 30px; height: 26px; font-size: 13px; cursor: pointer; }
@@ -79,7 +90,7 @@
 <div id="demo-fade"></div>
 <div id="demo-cap"><div class="ch"></div><h2></h2><p></p></div>
 <div id="demo-start" class="hidden"><button>▶ クリックでガイドツアーを始める（音が出ます）</button></div>
-<div id="demo-bar" class="hidden"><span id="demo-pos"></span><button id="demo-prev" title="前へ（←）">⏮</button><button id="demo-pause" title="一時停止（Space）">⏸</button><button id="demo-next" title="次へ（→）">⏭</button><button id="demo-stop" title="終了（Esc）">✕</button></div>
+<div id="demo-bar" class="hidden"><span id="demo-pos"></span><button id="demo-prev" title="前へ（←）">⏮</button><button id="demo-pause" title="一時停止（Space）">⏸</button><button id="demo-next" title="次へ（→）">⏭</button><button id="demo-stop" title="終了（Esc）">✕</button><button id="demo-snd" title="音のオン・オフ">🔊</button></div>
 <div id="mapbox" class="panel">
   <div class="cap">展開図（横=周方向 360° / 縦=軸方向）</div>
   <canvas id="minimap" width="360" height="306"></canvas>
@@ -143,25 +154,35 @@ const renderer = new THREE.WebGLRenderer({ preserveDrawingBuffer: REC, antialias
 renderer.domElement.id = 'view';
 renderer.setPixelRatio(Math.min(devicePixelRatio, LOW ? 1 : 1.5));
 // ?sns: スマホ縦長（9:16）のダイジェスト版。上下に黒帯（上=街区名、下=解説）
-const SNS = new URLSearchParams(location.search).has('sns') || (innerHeight > innerWidth * 1.1 && !new URLSearchParams(location.search).has('pc'));   // 縦長の画面（スマホなど）は自動で SNS 版。?pc で通常版
+const SNS = new URLSearchParams(location.search).has('sns') || (innerHeight > innerWidth * 1.1 && !new URLSearchParams(location.search).has('pc'));   // 縦長の画面（スマホなど）は自動で縦長表示。?pc で通常版
+const DIGEST = new URLSearchParams(location.search).has('sns');   // ?sns は約1分のダイジェスト（SNS_SHOTS）。縦長の画面で自動で縦長表示になったときは PC 版と同じツアー
+const MOBILE = SNS && !REC && innerWidth < innerHeight * 0.75;    // 画面自体が縦長（スマホ）: 画面いっぱいに出し、操作バーを下に置く
 const SNS_TOP = 0.15, SNS_BOT = 0.21;                      // 枠の高さに対する上下の帯の割合
+function snsBands(f) {                                     // 上の帯・下の帯（解説）・操作バーの高さ（px）
+  if (!MOBILE) return { top: Math.round(f.h * SNS_TOP), bot: Math.round(f.h * SNS_BOT), bar: 0 };
+  return { top: Math.round(f.h * 0.12), bot: Math.round(f.h * (DIGEST ? 0.16 : 0.24)), bar: 64 };
+}
 function snsFrame() {
+  if (MOBILE) return { x: 0, y: 0, w: innerWidth, h: innerHeight };
   let h = innerHeight, w = Math.round(h * 9 / 16);
   if (w > innerWidth) { w = innerWidth; h = REC ? Math.round(w * 16 / 9) : innerHeight; }   // 9:16 より縦長のスマホは画面いっぱい（動画の書き出しは 9:16 のまま）
   return { x: Math.round((innerWidth - w) / 2), y: Math.round((innerHeight - h) / 2), w, h };
 }
 function viewSize() {
   if (!SNS) return { w: innerWidth, h: innerHeight };
-  const f = snsFrame(); return { w: f.w, h: Math.round(f.h * (1 - SNS_TOP - SNS_BOT)) };
+  const f = snsFrame(), b = snsBands(f); return { w: f.w, h: f.h - b.top - b.bot - b.bar };
 }
 function layoutView() {
   const v = viewSize();
   renderer.setSize(v.w, v.h);
   if (SNS) {
     const f = snsFrame(), c = renderer.domElement.style;
-    c.position = 'fixed'; c.left = f.x + 'px'; c.top = Math.round(f.y + f.h * SNS_TOP) + 'px';
+    const b = snsBands(f);
+    c.position = 'fixed'; c.left = f.x + 'px'; c.top = (f.y + b.top) + 'px';
     const st = document.getElementById('sns-frame').style;
     Object.assign(st, { left: f.x + 'px', top: f.y + 'px', width: f.w + 'px', height: f.h + 'px', fontSize: (f.w / 1080 * 100) + 'px' });
+    Object.assign(document.getElementById('sns-top').style, { height: b.top + 'px' });
+    Object.assign(document.getElementById('sns-bot').style, { height: b.bot + 'px', bottom: b.bar + 'px' });
   }
 }
 layoutView();
@@ -2684,9 +2705,13 @@ function updateAudio(dt) {
     for (let i = 0; i < n; i++) chirp(ctx, now + i * rr(0.09, 0.16), pan);
   }
 }
+function toggleMute() {
+  audio.muted = !audio.muted; if (music.out) music.out.gain.setTargetAtTime(music.on && !audio.muted ? 0.8 : 0, audio.ctx.currentTime, 0.3);
+  el('s-snd').textContent = audio.muted ? 'ミュート中（M で解除）' : 'ON（M でミュート）'; el('demo-snd').textContent = audio.muted ? '🔇' : '🔊';
+}
 addEventListener('pointerdown', startAudio);
 addEventListener('keydown', e => {
-  if (e.code === 'KeyM' && audio.ctx) { audio.muted = !audio.muted; if (music.out) music.out.gain.setTargetAtTime(music.on && !audio.muted ? 0.8 : 0, audio.ctx.currentTime, 0.3); el('s-snd').textContent = audio.muted ? 'ミュート中（M で解除）' : 'ON（M でミュート）'; }
+  if (e.code === 'KeyM' && audio.ctx) toggleMute();
   else startAudio();
 });
 const VTYPES = [
@@ -3436,7 +3461,7 @@ addEventListener('keyup', e => keys.delete(e.code));
 addEventListener('blur', () => keys.clear());
 addEventListener('resize', () => {
   camera.aspect = viewSize().w / viewSize().h; camera.updateProjectionMatrix();
-  layoutView();
+  layoutView(); fitSnsText();
   for (const k of ['sceneRT', 'dofRT', 'aoRT']) post[k].dispose();
   post.bloom.dispose();
   makePost();
@@ -3666,7 +3691,7 @@ const SNS_SHOTS = [
     space: { mode: 'overview', from: { az: 1.4, tilt: 1.15, dist: 22000, tz: -1000 }, to: { az: 0.6, tilt: 1.05, dist: 32000, tz: -2000 } } },
 ];
 const demo = { on: false, paused: false, i: 0, t: 0, start: null };
-const SHOTLIST = () => SNS ? SNS_SHOTS : SHOTS;
+const SHOTLIST = () => DIGEST ? SNS_SHOTS : SHOTS;
 
 // ===== BGM（WebAudio で合成）: 落ち着いたテンポのエレピ風ピアノ＋ベース＋シンセパッド、宇宙っぽい残響 =====
 const music = { on: false, timer: null, next: 0, step: 0 };
@@ -3752,13 +3777,41 @@ function setMusic(on) {
   music.on = on;
 }
 const demoEl = { cap: el('demo-cap'), fade: el('demo-fade'), bar: el('demo-bar') };
+// 縦長表示の字幕: 単語の切れ目にだけ改行できる所（<wbr>）を入れ、帯からはみ出すときは文字を小さくする
+const SEG = window.Intl && Intl.Segmenter ? new Intl.Segmenter('ja', { granularity: 'word' }) : null;
+const escHTML = t => t.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+function wrapWords(text) {
+  return text.split('\n').map(line => {
+    if (!SEG) return escHTML(line);
+    const w = [];
+    for (const { segment: g } of SEG.segment(line)) {
+      // ひらがな（助詞・語尾）・句読点・閉じ括弧は前の語に、開き括弧の後ろは次の語につなげて、文節の途中や行頭の「。」で改行しない
+      // 漢字1文字（「宇宙|港」の「港」など）も前の漢字につなげる
+      const prev = w[w.length - 1];
+      if (prev && (/^[ぁ-ゟ、。，．・！？!?）」』】〕ー〜…\s]+$/.test(g) || /[（「『【〔]$/.test(prev) || (/^[一-鿿]$/.test(g) && /[一-鿿]$/.test(prev)))) w[w.length - 1] += g; else w.push(g);
+    }
+    return w.map(escHTML).join('<wbr>');
+  }).join('<br>');
+}
+function fitOne(e, box, maxPx, minPx, maxLines) {
+  let s = maxPx;
+  const fill = () => [...box.children].reduce((a, c) => a + c.offsetHeight, 0) * 1.08;   // 中央寄せではみ出た分は scrollHeight に出ないので、中身の高さを足して比べる
+  const over = () => e.scrollWidth > e.clientWidth + 1 || fill() > box.clientHeight || (maxLines && e.offsetHeight > s * 1.2 * (maxLines + 0.4));   // 行の高さは CSS の line-height: 1.2
+  for (e.style.fontSize = s + 'px'; s > minPx && over(); ) e.style.fontSize = --s + 'px';
+}
+function fitSnsText() {
+  if (!SNS) return;
+  const base = parseFloat(el('sns-frame').style.fontSize) || 36, tp = el('sns-top'), bt = el('sns-bot');
+  fitOne(tp.querySelector('.t'), tp, Math.round(base * 0.78), 12, 2);
+  fitOne(bt.querySelector('.x'), bt, Math.round(base * 0.5), 10, 0);
+}
 const ease = u => u * u * (3 - 2 * u);
 function demoStartShot(i) {
   const sh = SHOTLIST()[i];
   if (SNS) {                                         // 上下の帯の文字を切り替える
     const tp = el('sns-top'), bt = el('sns-bot');
     [tp, bt].forEach(e => [...e.children].forEach(c => c.style.opacity = 0));
-    const put = () => { tp.querySelector('.ch').textContent = sh.ch; tp.querySelector('.t').textContent = sh.t; bt.querySelector('.x').innerHTML = sh.x.replace(/\n/g, '<br>'); [tp, bt].forEach(e => [...e.children].forEach(c => c.style.opacity = 1)); };
+    const put = () => { tp.querySelector('.ch').textContent = sh.ch; tp.querySelector('.t').innerHTML = wrapWords(sh.t); bt.querySelector('.x').innerHTML = wrapWords(sh.x); fitSnsText(); [tp, bt].forEach(e => [...e.children].forEach(c => c.style.opacity = 1)); };
     const tk = demo.snsTok = (demo.snsTok || 0) + 1;   // 連打したとき、前の場面の文字が遅れて出ないように
     if (REC) put(); else setTimeout(() => { if (tk === demo.snsTok) put(); }, 300);
   }
@@ -3775,7 +3828,7 @@ function demoStartShot(i) {
   const cp = c.querySelector('p'); cp.style.opacity = 0;
   setTimeout(() => { if (token !== demo.token) return; c.querySelector('.ch').textContent = sh.ch; c.querySelector('h2').textContent = sh.t; cp.textContent = sh.x; c.style.opacity = 1; }, 600);
   setTimeout(() => { if (token === demo.token) cp.style.opacity = 1; }, 1800);   // 解説はタイトルを読んで景色を見たあとに出す
-  el('demo-pos').textContent = `ガイドツアー ${i + 1} / ${SHOTLIST().length}`;
+  el('demo-pos').textContent = MOBILE ? `${i + 1} / ${SHOTLIST().length}` : `ガイドツアー ${i + 1} / ${SHOTLIST().length}`;
   const white = sh.fadeColor === '#ffffff';
   demoEl.fade.style.transition = 'none'; demoEl.fade.style.background = sh.fadeIn ? (sh.fadeColor || '#000') : '#000';
   demoEl.fade.style.opacity = sh.fadeIn || i === 0 ? 1 : 0;
@@ -3842,6 +3895,7 @@ el('demo-prev').onclick = e => { e.currentTarget.blur(); demoStep(-1); };
 el('demo-next').onclick = e => { e.currentTarget.blur(); demoStep(1); };
 el('demo-pause').onclick = e => { e.currentTarget.blur(); setDemoPause(!demo.paused); };
 el('demo-stop').onclick = () => stopDemo();
+el('demo-snd').onclick = e => { e.currentTarget.blur(); startAudio(); if (audio.ctx) toggleMute(); };
 addEventListener('keydown', e => {
   if (demo.on && SNS) { startAudio(); setMusic(true); if (['Space', 'KeyG', 'Escape'].includes(e.code)) { setDemoPause(false); e.preventDefault(); e.stopImmediatePropagation(); return; } }   // SNS 版はキーで止めない（どのキーでも音が出るだけ）
   if (demo.on) {
@@ -3894,6 +3948,7 @@ setTimeout(() => {
   window.__ready = true; window.__demo = demo; window.__startDemo = startDemo; window.__demoShot = demoStartShot; window.__lm = landmarks; window.__demoTitle = n => SHOTLIST()[n] && SHOTLIST()[n].t; window.__demoDur = n => SHOTLIST()[n].dur; window.__player = player; window.__ships = ships; window.__trains = vehicles.trains; window.__night = toggleNight; window.__space = space; window.__toggleSpace = toggleSpace; window.__viewEntrance = viewEntrance; window.__extShips = extShips; window.__post = post; window.__t = () => elapsed; window.__scene = scene; window.__axis = () => axisCarMesh;
   frame(REC ? 0 : undefined);
   if (SNS) document.documentElement.classList.add('sns');
+  if (MOBILE) { document.documentElement.classList.add('mobile'); el('demo-start').querySelector('button').innerHTML = '▶ タップでガイドツアーを始める<br><small>（音が出ます）</small>'; }
   if (REC) document.documentElement.classList.add('rec');
   // ?demo・?sns はクリックで始める（ブラウザはクリック前に音を出させないので、自動で始めると BGM が鳴らない）。動画の書き出しはすぐ始める
   if (REC) startDemo();
