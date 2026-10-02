@@ -49,7 +49,8 @@
   html.sns, html.sns body { background: #111; }
   #sns-top, #sns-bot { box-sizing: border-box; padding: 0 0.3em; overflow: hidden; }
   #sns-top .t, #sns-bot .x { max-width: 100%; box-sizing: border-box; }
-  #sns-top .w, #sns-bot .w { display: inline-block; }   /* wrapWords で区切った語のまとまり。改行はまとまりの間だけ（keep-all だと Safari が「「」の後ろで改行する） */
+  #sns-top .w, #sns-bot .w { display: inline-block; }
+  #sns-top, #sns-bot { transform: translateZ(0); }   /* 帯を独立した層で描く（iPhone の Safari で前の文字が残るのを防ぐ） */   /* wrapWords で区切った語のまとまり。改行はまとまりの間だけ（keep-all だと Safari が「「」の後ろで改行する） */
   /* スマホ: 画面いっぱいに出し、下に指で押せる操作バー */
   #sns-top .t { line-height: 1.2; }
   .mobile #sns-bot .x { font-weight: 600; line-height: 1.65; text-align: left; padding: 0 0.5em; }
@@ -3812,7 +3813,13 @@ function demoStartShot(i) {
   if (SNS) {                                         // 上下の帯の文字を切り替える
     const tp = el('sns-top'), bt = el('sns-bot');
     [tp, bt].forEach(e => [...e.children].forEach(c => c.style.opacity = 0));
-    const put = () => { tp.querySelector('.ch').textContent = sh.ch; tp.querySelector('.t').innerHTML = wrapWords(sh.t); bt.querySelector('.x').innerHTML = wrapWords(sh.x); fitSnsText(); [tp, bt].forEach(e => [...e.children].forEach(c => c.style.opacity = 1)); };
+    // 文字の要素は毎回作り直す（iPhone の Safari は中身だけ書き換えると、前の長いタイトルがはみ出していた所を描き直さず残す）
+    const renew = (box, sel, html) => { const o = box.querySelector(sel), n = o.cloneNode(false); n.innerHTML = html; n.style.fontSize = ''; o.replaceWith(n); return n; };
+    const put = () => {
+      const ns = [renew(tp, '.ch', escHTML(sh.ch)), renew(tp, '.t', wrapWords(sh.t)), renew(bt, '.x', wrapWords(sh.x))];
+      fitSnsText();
+      if (REC) ns.forEach(n => n.style.opacity = 1); else requestAnimationFrame(() => ns.forEach(n => n.style.opacity = 1));
+    };
     const tk = demo.snsTok = (demo.snsTok || 0) + 1;   // 連打したとき、前の場面の文字が遅れて出ないように
     if (REC) put(); else setTimeout(() => { if (tk === demo.snsTok) put(); }, 300);
   }
