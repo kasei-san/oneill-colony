@@ -3442,7 +3442,7 @@ let dragging = false;
 renderer.domElement.addEventListener('pointerdown', e => { dragging = true; renderer.domElement.setPointerCapture(e.pointerId); });
 renderer.domElement.addEventListener('pointerup', e => { dragging = false; renderer.domElement.releasePointerCapture(e.pointerId); });
 renderer.domElement.addEventListener('pointermove', e => {
-  if (!dragging) return;
+  if (!dragging || demo.on) return;   // ツアー中はカメラをツアーが動かすのでドラッグは無視
   if (space.on) { space.az -= e.movementX * 0.004; space.tilt = THREE.MathUtils.clamp(space.tilt - e.movementY * 0.004, 0.25, 2.9); return; }
   player.yaw -= e.movementX * 0.0035;
   player.pitch = THREE.MathUtils.clamp(player.pitch - e.movementY * 0.0035, -1.5, 1.5);
