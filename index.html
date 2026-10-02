@@ -48,14 +48,14 @@
   .rec #sns-top > *, .rec #sns-bot > *, .rec #demo-fade { transition: none !important; }
   html.sns, html.sns body { background: #111; }
   #sns-top, #sns-bot { box-sizing: border-box; padding: 0 0.3em; overflow: hidden; }
-  #sns-top .t, #sns-bot .x { max-width: 100%; box-sizing: border-box; word-break: keep-all; overflow-wrap: normal; }   /* 改行は wrapWords が入れた単語の切れ目だけ */
+  #sns-top .t, #sns-bot .x { max-width: 100%; box-sizing: border-box; }
+  #sns-top .w, #sns-bot .w { display: inline-block; }   /* wrapWords で区切った語のまとまり。改行はまとまりの間だけ（keep-all だと Safari が「「」の後ろで改行する） */
   /* スマホ: 画面いっぱいに出し、下に指で押せる操作バー */
   #sns-top .t { line-height: 1.2; }
   .mobile #sns-bot .x { font-weight: 600; line-height: 1.65; text-align: left; padding: 0 0.5em; }
   .mobile.sns #demo-bar { left: 0; right: 0; bottom: 0; height: 64px; box-sizing: border-box; padding: 0 10px; border-radius: 0; background: #000; justify-content: center; gap: 12px; font-size: 14px; }
   .mobile #demo-bar button { min-width: 56px; height: 46px; font-size: 20px; border-radius: 10px; -webkit-tap-highlight-color: transparent; }
   .mobile #demo-pos { min-width: 4.2em; text-align: center; font-variant-numeric: tabular-nums; }
-  .noseg #sns-top .t, .noseg #sns-bot .x { word-break: normal; }   /* Intl.Segmenter が無いブラウザは単語の切れ目が分からないので、普通に折り返す */
   #demo-snd { display: none; }
   .mobile #demo-snd { display: inline-block; }
   .mobile #demo-start button { margin: 0 16px; line-height: 1.5; }
@@ -3778,7 +3778,7 @@ function setMusic(on) {
   music.on = on;
 }
 const demoEl = { cap: el('demo-cap'), fade: el('demo-fade'), bar: el('demo-bar') };
-// 縦長表示の字幕: 単語の切れ目にだけ改行できる所（<wbr>）を入れ、帯からはみ出すときは文字を小さくする
+// 縦長表示の字幕: 語のまとまりごとに inline-block で包んで単語の途中で改行させず、帯からはみ出すときは文字を小さくする
 const SEG = window.Intl && Intl.Segmenter ? new Intl.Segmenter('ja', { granularity: 'word' }) : null;
 const escHTML = t => t.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
 function wrapWords(text) {
@@ -3787,16 +3787,16 @@ function wrapWords(text) {
     const w = [];
     for (const { segment: g } of SEG.segment(line)) {
       // ひらがな（助詞・語尾）・句読点・閉じ括弧は前の語に、開き括弧の後ろは次の語につなげて、文節の途中や行頭の「。」で改行しない
-      // 漢字1文字（「宇宙|港」の「港」など）も前の漢字につなげる
+      // 漢字1文字（「宇宙|港」の「港」など）は前の漢字に、数字の後ろ（「6|基」）は数字につなげる
       const prev = w[w.length - 1];
-      if (prev && (/^[ぁ-ゟ、。，．・！？!?）」』】〕ー〜…\s]+$/.test(g) || /[（「『【〔]$/.test(prev) || (/^[一-鿿]$/.test(g) && /[一-鿿]$/.test(prev)))) w[w.length - 1] += g; else w.push(g);
+      if (prev && (/^[ぁ-ゟ、。，．・！？!?）」』】〕ー〜…\s]+$/.test(g) || /[（「『【〔]$/.test(prev) || /[0-9０-９]$/.test(prev) || (/^[一-鿿]$/.test(g) && /[一-鿿]$/.test(prev)))) w[w.length - 1] += g; else w.push(g);
     }
-    return w.map(escHTML).join('<wbr>');
+    return w.map(t => `<span class="w">${escHTML(t)}</span>`).join('');
   }).join('<br>');
 }
 function fitOne(e, box, maxPx, minPx, maxLines) {
   let s = maxPx;
-  const fill = () => [...box.children].reduce((a, c) => a + c.offsetHeight, 0) * 1.08;   // 中央寄せではみ出た分は scrollHeight に出ないので、中身の高さを足して比べる
+  const fill = () => [...box.children].reduce((a, c) => a + c.offsetHeight, 0) * 1.15;   // 中央寄せではみ出た分は scrollHeight に出ないので、中身の高さを足して比べる
   const over = () => e.scrollWidth > e.clientWidth + 1 || fill() > box.clientHeight || (maxLines && e.offsetHeight > s * 1.2 * (maxLines + 0.4));   // 行の高さは CSS の line-height: 1.2
   for (e.style.fontSize = s + 'px'; s > minPx && over(); ) e.style.fontSize = --s + 'px';
 }
@@ -3949,7 +3949,6 @@ setTimeout(() => {
   window.__ready = true; window.__demo = demo; window.__startDemo = startDemo; window.__demoShot = demoStartShot; window.__lm = landmarks; window.__demoTitle = n => SHOTLIST()[n] && SHOTLIST()[n].t; window.__demoDur = n => SHOTLIST()[n].dur; window.__player = player; window.__ships = ships; window.__trains = vehicles.trains; window.__night = toggleNight; window.__space = space; window.__toggleSpace = toggleSpace; window.__viewEntrance = viewEntrance; window.__extShips = extShips; window.__post = post; window.__t = () => elapsed; window.__scene = scene; window.__axis = () => axisCarMesh;
   frame(REC ? 0 : undefined);
   if (SNS) document.documentElement.classList.add('sns');
-  if (!SEG) document.documentElement.classList.add('noseg');
   if (MOBILE) { document.documentElement.classList.add('mobile'); el('demo-start').querySelector('button').innerHTML = '▶ タップでガイドツアーを始める<br><small>（音が出ます）</small>'; }
   if (REC) document.documentElement.classList.add('rec');
   // ?demo・?sns はクリックで始める（ブラウザはクリック前に音を出させないので、自動で始めると BGM が鳴らない）。動画の書き出しはすぐ始める
